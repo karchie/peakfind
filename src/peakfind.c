@@ -14,8 +14,8 @@
 /*
  * external fortran routines:
  * npad_(int *size, int *padded_size)
- * imgpad(float *src, int*, int*, int*, float *dst, int*, int*, int*)
- * imgdap(float *dst, int*, int*, int*, float *src, int*, int*, int*)
+ * imgpad_(float *src, int*, int*, int*, float *dst, int*, int*, int*)
+ * imgdap_(float *dst, int*, int*, int*, float *src, int*, int*, int*)
  */
 
 typedef struct
@@ -323,9 +323,6 @@ void find_peaks(float *image, int dim[3],
 	  w[k] = -dvdx[k] / d2vdx2[k];
 	  del2v += d2vdx2[k] / (mmppixr[k] * mmppixr[k]);
 	}
-
-	/* !!! check with Avi */
-	del2v = d2vdx2[2] / (mmppixr[2] * mmppixr[2]);
 
 	fndex[0] = w[0] + ix + 1;
 	fndex[1] = w[1] + iy + 1;
