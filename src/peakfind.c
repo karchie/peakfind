@@ -39,6 +39,8 @@ static const unsigned int LOG_PEAK_TRACE = 0x04;
 static const unsigned int LOG_PEAK_RESULTS = 0x08;
 static const unsigned int LOG_UNDEF_POINT = 0x10;
 
+static const unsigned int NTOP = 1000;
+
 /*
  * error types
  */
@@ -95,7 +97,7 @@ void set_error_handler(void (*f)(int, const char *)) {
 
 static void logpeaklist(EXTREMUM *plst, int nlst,
 			float mmppixr[3], float centerr[3],
-			int nvox_flag) {
+			int ntop, int nvox_flag) {
   int i, k;
   float fndex[3];
   
@@ -187,9 +189,9 @@ static void consolidate(EXTREMUM *plst, int nlst) {
     int npair = 0;
   
     log(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm:\n", dthresh);
-    for (i = 0; i < ntop && i < nlst; i++) {
+    for (i = 0; i < nlst; i++) {
       if (plst[i].killed) continue;
-      for (j = i + 1; j < ntop && j < nlst; j++) {
+      for (j = i + 1; j < nlst; j++) {
 	if (plst[j].killed) continue;
 	t = (float) pdist (plst + i, plst + j);
 	if (t < dthresh) {
@@ -351,8 +353,8 @@ void find_peaks(float *image, int dim[3],
   consolidate(pneg, nneg);
   int npos0 = npos, nneg0 = nneg;
 
-  logpeaklist(ppos, npos, mmppixr, centerr, 1);
-  logpeaklist(pneg, nneg, mmppixr, centerr, 1);
+  logpeaklist(ppos, npos, mmppixr, centerr, NTOP, 1);
+  logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 1);
 
   /* TODO: combine positive and negative peak lists
 	   create output ROI? */
