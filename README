@@ -1,0 +1,7 @@
+peakfind
+
+Finds peaks in 3d slices of 4d images. Adapted from peak_4dfp by Avi
+Snyder and peak_nii by Tony Wilson.
+
+Copyright (c) 2012 Washington University
+Author: Kevin A. Archie <karchie@wustl.edu>
