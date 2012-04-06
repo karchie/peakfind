@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
+#include "peakfind.h"
 #include "rms.h"
 #include "4dfpf.h"
 
@@ -67,12 +68,48 @@ static void logmsg(int option, char *message, ...) {
  * @param should nonzero if image padding should be logged,
  *        zero if it should not
  */
-void set_log_image_padding(int should) {
+void peakf_set_log_image_padding(int should) {
   if (should) {
     verbosity |= LOG_IMAGE_PADDING;
   } else {
     verbosity &= ~LOG_IMAGE_PADDING;
   }
+}
+
+void peakf_set_log_peak_params(int should) {
+  if (should) {
+    verbosity |= LOG_PEAK_PARAMS;
+  } else {
+    verbosity &= ~LOG_PEAK_PARAMS;
+  }
+}
+
+void peakf_set_log_peak_trace(int should) {
+  if (should) {
+    verbosity |= LOG_PEAK_TRACE;
+  } else {
+    verbosity &= ~LOG_PEAK_TRACE;
+  }
+}
+
+void peakf_set_log_peak_results(int should) {
+  if (should) {
+    verbosity |= LOG_PEAK_RESULTS;
+  } else {
+    verbosity &= ~LOG_PEAK_RESULTS;
+  }
+}
+
+void peakf_set_log_undef_point(int should) {
+  if (should) {
+    verbosity |= LOG_UNDEF_POINT;
+  } else {
+    verbosity &= ~LOG_UNDEF_POINT;
+  }
+}
+
+void peakf_set_log(int should) {
+  verbosity = should ? ~0 : 0;
 }
 
 
@@ -91,7 +128,7 @@ static void default_error(int type, const char *message) {
 
 static void (*error_handler)(int, const char *) = default_error;
 
-void set_error_handler(void (*f)(int, const char *)) {
+void peakf_set_error_handler(void (*f)(int, const char *)) {
   error_handler = f;
 }
 
