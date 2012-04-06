@@ -6,6 +6,7 @@
  * Author: Kevin A. Archie <karchie@wustl.edu>
  **/
 
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -160,6 +161,7 @@ void sphereblur(float* image, int dim[3], double mmppixr[3],
 }
 
 
+/* value ordering for extrema */
 static int pcompare(const void *ptr1, const void *ptr2) {
   EXTREMUM *p1 = ptr1, *p2 = ptr2;
   if (p1->v == p2->v) {
@@ -171,42 +173,123 @@ static int pcompare(const void *ptr1, const void *ptr2) {
   }
 }
 
-static double pdist(EXTREMUM *p1, EXTREMUM *p2) {
-  double q;
+/**
+ * Returns the square of the distance between two peaks.
+ *
+ * @param p1 pointer to peak 1
+ * @param p2 pointer to peak 2
+ * @return square of distance between p1 and p2
+ */
+static float pdist2(EXTREMUM *p1, EXTREMUM *p2) {
   int k;
+  float q = 0.0;
   
   for (k = 0; k < 3; k++) {
-    q += (p2->x[k] - p1->x[k]) * (p2->x[k] - p1->x[k]);
+    float dk = p2->x[k] - p1->x[k];
+    q += dk * dk;
   }
-  return sqrt(q);
+  return q;
 }
 
-static void consolidate(EXTREMUM *plst, int nlst) {
-  float dmin = 1.0e6;
-  do {
-    float x[3], t;
-    int i, j, imin, jmin, k;
-    int npair = 0;
+
+/**
+ * Combine the non-killed peaks from ppos and pneg into a single,
+ * newly allocated array.
+ *
+ * @param ppall output array pointer
+ * @param ppos positive peaks array
+ * @param npos number of positive peaks
+ * @param pneg negative peaks array
+ * @param nneg number of negative peaks
+ * @return number of combined peaks (i.e., size of *ppall)
+ */
+static int combine_extrema(float **ppall,
+			   float *ppos, int npos,
+			   float *pneg, int nneg) {
+  int i, nall = 0;
+  for (i = 0; i < npos; i++) {
+    if (!ppos[i].killed) nall++;
+  }
+  for (i = 0; i < nneg; i++) {
+    if (!pneg[i].killed) nall++;
+  }
+
+  if (nall > 0) {
+    int iall = 0;
+
+    *ppall = malloc(nall * sizeof(EXTREMUM));
+    if (!*ppall) {
+      error_handler(ERROR_ALLOCATION, "peak combination");
+    }
+
+    for (int i = 0; i < npos; i++) {
+      if (!ppos[i].killed) {
+	*ppall[iall++] = ppos[i];
+      }
+    }
+    for (int i = 0; i < nneg; i++) {
+      if (!pneg[i].killed) {
+	*ppall[iall++] = ppos[i];
+      }
+    }
+    assert(iall == nall);
+  }
+  return nall;
+}
   
-    log(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm:\n", dthresh);
+
+/**
+ * Mark as killed any peaks that are too close to a strong peak, where
+ * too close means within sqrt(d2thresh) mm. Move each surviving peak
+ * to the center of mass of its cluster.
+ *
+ * @param plst array of peaks
+ * @param nlst size of peak array
+ * @param d2thresh square of threshold distance
+ */
+static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
+  int npair;
+  do {
+    float d2min = MAXFLOAT;
+    int i, j, imin, jmin;
+
+    /* On each pass, if any peaks are within threshold distance of
+     * each other, consolidate just the two closest peaks.
+     * Consolidation kills the larger-indexed peak, adds its weight to
+     * the surviving peak, and moves the surviving peak to the
+     * weighted average location.
+     */
+
+    /* Look for the closest within-threshold pair, if any */
+    npair = 0;
+    log(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm:\n",
+	sqrt(d2thresh));
     for (i = 0; i < nlst; i++) {
       if (plst[i].killed) continue;
       for (j = i + 1; j < nlst; j++) {
+	float t2;
 	if (plst[j].killed) continue;
-	t = (float) pdist (plst + i, plst + j);
-	if (t < dthresh) {
-	  log(LOG_PEAK_RESULTS, "%5d%5d%10.4f\n", i + 1, j + 1, t);
-	  if (t < dmin) {
+	t2 = pdist2(plst + i, plst + j);
+	if (t2 < d2thresh) {
+	  log(LOG_PEAK_RESULTS, "%5d%5d%10.4f\n", i + 1, j + 1, t2);
+	  if (t2 < d2min) {
 	    imin = i;
 	    jmin = j;
-	    dmin = t;
+	    d2min = t2;
 	  }
 	  npair++;
 	}
       }
     }
+
+    /* If any peak pairs were within threshold, consolidate the
+     * closest pair.
+     */
     log(LOG_PEAK_RESULTS, "npair = %d\n", npair);
-    if (npair) {
+    if (npair > 0) {
+      int k;
+      float x[3];
+
       for (k = 0; k < 3; k++) {
 	x[k] = plst[imin].weight*plst[imin].x[k]
 	  + plst[jmin].weight*plst[jmin].x[k];
@@ -218,7 +301,7 @@ static void consolidate(EXTREMUM *plst, int nlst) {
       plst[jmin].killed++;
       npair--;
     }
-  } while (npair);
+  } while (npair > 0);
 }
 
 
@@ -284,11 +367,87 @@ static void consolidate(EXTREMUM *plst, int nlst) {
 #define ADD_NEG_PEAK(img, d, i) ADD_PEAK(img, d, i, neg, <)
 
 
+/**
+ * Fills roi with a peaks mask built from img.
+ *
+ * @param img original 3D image
+ * @param roi output mask image: img where close to peak, 0 elsewhere
+ * @param mask optional mask to apply to ROI (null if none)
+ * @param dim dimensions of roi and (optional) mask
+ * @param ppos array of local maxima
+ * @param npos size of ppos
+ * @param pneg array of local minima
+ * @param nneg size of pneg
+ * @param mmppixr mm/pixel for each dimension
+ * @param centerr location offset, in mm
+ * @param orad radius of peak spheres
+ */
+void build_mask(float *img, float *mask, float *roi, int dim[3],
+		EXTREMUM pall[], int nall,
+		float mmppixr[3], float centerr[3],
+		float orad) {
+  const float orad2 = orad * orad;
+  EXTREMUM p;			/**< location (ix,iy,iz) */
+  int i = 0, ix, iy, iz;
+  
+  // TODO: throw out local minima in positive territory,
+  // local maxima in negative territory
+
+  for (iz = 0; iz < dim[2]; iz++) {
+    p.x[2] = (iz + 1) * mmppixr[2] - centerr[2];
+    for (iy = 0; iy < dim[1]; iy++) {
+      p.x[1] = (iy + 1) * mmppixr[1] - centerr[1];
+      for (ix = 0; ix < dim[0]; ix++, i++) {
+	float d2min = MAXFLOAT;
+	int ip, ipmin, k;
+	float tmin;
+
+	p.x[0] = (ix + 1) * mmppixr[0] - centerr[0];
+
+	/* find the closest peak to (ix,iy,iz) */
+	for (ip = 0; ip < nall; ip++) {
+	  float t2 = pdist2(&p, pall + ip);
+	  if (t2 < d2min) {
+	    ipmin = ip;
+	    d2min = t2;
+	  }
+	}
+
+	/* if the closest peak is within orad, mark this point. */
+	/* TODO: check with Avi on mask values, 1e-37 comparison */
+	if (d2min < orad2 && (!mask || fabs(mask[i]) > 1.0e-37))
+	  roi[i] = img[i];
+	  pall[ipmin].nvox++;
+	} else {
+	  roi[i] = 0.0;
+	}
+      }
+    }
+  }
+}
+
+/**
+ * Find peaks in the provided 3d image.
+ *
+ * @param image 3D image data (as single-precision floats)
+ * @param dim dimensions of image
+ * @param mmppixr mm to pixel scaling factor
+ * @param centerr location offset, in mm
+ * @param vtneg
+ * @param vtpos
+ * @param ctneg
+ * @param ctpos
+ * @param dthresh peak distance threshold: if two peaks are
+ *                within dthresh of each other, they are consolidated
+ *                into a single, stronger peak
+ */
 void find_peaks(float *image, int dim[3],
 		float mmppixr[3], float centerr[3],
-		float vtneg, float vtpos, float ctneg, float ctpos) {
-  EXTREMUM *ppos, *pneg;
-  int mpos = MSIZE, mneg = MSIZE;
+		float vtneg, float vtpos, float ctneg, float ctpos,
+		float dthresh) {
+  EXTREMUM *ppos, *pneg, *pall;	/**< local maxima, minima, all extrema */
+  int npos = 0, nneg = 0, nall;	/**< number of maxima, minima, extrema */
+  int mpos = MSIZE, mneg = MSIZE; /**< array allocation sizes */
   int iz, iy, ix;
 
   ppos = malloc(mpos * sizeof(EXTREMUM));
@@ -306,11 +465,10 @@ void find_peaks(float *image, int dim[3],
       "peak curvature thresholds %10.4f to %10.4f\n", ctneg, ctpos);
   log(LOG_PEAK_TRACE, "compiling extrema slice");
 
-  int nx = dim[0], nxy = dim[0]*dim[1];
-  for (iz = 1; iz < dim[2] - 1; iz++) {
+  int i = 0;
+  for (iz = 0; iz < dim[2] - 1; iz++) {
     for (iy = 1; iy < dim[1] - 1; iy++) {
-      for (iz = 1; iz < dim[0] - 1; iz++) {
-	int i = ix + dim[0] * (iy + dim[1] * iz);
+      for (ix = 1; ix < dim[0] - 1; ix++, i++) {
 	float del2v = 0.0, dvdx[3], d2vdx2[3], w[3], fndex[3];
 	
 	dvdx[0] = (-image[i - 1] + image[i + 1]) / 2.0;
@@ -347,16 +505,20 @@ void find_peaks(float *image, int dim[3],
 
   /* Sort by value, then consolidate nearby extrema */
   qsort(ppos, npos, sizeof(EXTREMUM), pcompare);
+  consolidate(ppos, npos, d2thresh);
   qsort(pneg, nneg, sizeof(EXTREMUM), pcompare);
-
-  consolidate(ppos, npos);
-  consolidate(pneg, nneg);
-  int npos0 = npos, nneg0 = nneg;
+  consolidate(pneg, nneg, d2thresh);
 
   logpeaklist(ppos, npos, mmppixr, centerr, NTOP, 1);
   logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 1);
 
-  /* TODO: combine positive and negative peak lists
-	   create output ROI? */
-  
+  nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
+  if (orad > 0) {
+    build_mask(imgdata, null, roi, dim, pall, nall,
+	       mmppixr, centerr, orad);
+  }
+
+  free(ppos);
+  free(pneg);
+  free(pall);
 }
