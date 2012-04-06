@@ -76,6 +76,10 @@ void set_log_image_padding(int should) {
 }
 
 
+/*
+ * Error handling
+ */
+
 static void default_error(int type, const char *message) {
   fputs(error_messages[type], stderr);
   if (message) {
@@ -91,6 +95,9 @@ void set_error_handler(void (*f)(int, const char *)) {
   error_handler = f;
 }
 
+/*
+ * utilities
+ */
 
 static int logpeaklist(EXTREMUM *plst, int nlst,
 		       float mmppixr[3], float centerr[3],
@@ -123,41 +130,16 @@ static int logpeaklist(EXTREMUM *plst, int nlst,
   return ntot;
 }
 
+
 /**
- * Convolves the provided image in place with a sphere of the provided
- * radius. Uses Avi's FORTRAN routine hsphere3d.
- *
- * @param image 3D image array
- * @param dimensions (x,y,z) of image
- * @param mmppixr mm/pixel for each dimension
- * @param radius radius of blurring sphere, in mm
+ * qsort-compatible comparison function for sorting EXTREMUM structs
+ * into descending value order
+ * @param ptr1 one EXTREMUM
+ * @param ptr2 another EXTREMUM
+ * @return  0 if p1.v == p2.v,
+ *         -1 if |p1.v| > |p2.v|,
+ *          1 if |p1.v| < |p2.v|
  */
-void sphereblur(float* image, int dim[3], float mmppixr[3],
-		float radius) {
-  int i;
-  int pdim[3], psize = 1;
-
-  for (i = 0; i < 3; i++) {
-    int margin = 2.0 * radius / mmppixr[i];
-    pdim[i] = npad_(dim + i, &margin);
-    psize *= pdim[i];
-  }
-  logmsg(LOG_IMAGE_PADDING,
-	 "image dimensions %d %d %d padded to %d %d %d\n",
-	 dim[0], dim[1], dim[2], pdim[0], pdim[1], pdim[2]);
-  
-  float *padimage = calloc(psize, sizeof(float));
-  if (!padimage) {
-    error_handler(ERROR_ALLOCATION, "blur padding");
-  }
-  
-  imgpad_(image, dim, dim+1, dim+2, padimage, pdim, pdim+1, pdim+2);
-  hsphere3d_(padimage, pdim, pdim+1, pdim+2, mmppixr, &radius);
-  imgdap_(image, dim, dim+1, dim+2, padimage, pdim, pdim+1, pdim+2);
-}
-
-
-/* value ordering for extrema */
 static int pcompare(const void *ptr1, const void *ptr2) {
   const EXTREMUM *p1 = ptr1, *p2 = ptr2;
   if (p1->v == p2->v) {
@@ -168,6 +150,7 @@ static int pcompare(const void *ptr1, const void *ptr2) {
     return 1;
   }
 }
+
 
 /**
  * Returns the square of the distance between two peaks.
@@ -301,74 +284,6 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
 }
 
 
-/*! \def IS_PEAK(img, d, i, dir, op)
- * \brief Builds the test for whether this is a local extremum.
- *
- * \param img image data
- * \param d image dimensions (int[3])
- * \param i index of point being checked
- * \param dir pos or neg
- * \param op > (for positive) or < (for negative)
- *
- * Assumes the containing scope includes variables:
- *
- * del2v
- * ct{dir}
- */
-#define IS_PEAK(img, d, i, dir, op) \
-  img[i] op 0.0 && del2v op ## = -ct ## dir \
-    && img[i] op img[i-1]         && img[i] op img[i+1] \
-    && img[i] op img[i-d[0]]      && img[i] op img[i+d[0]] \
-    && img[i] op img[i-d[0]*d[1]] && img[i] op img[i+d[0]*d[1]]
-
-#define IS_POS_PEAK(img, d, i) IS_PEAK(img, d, i, pos, >)
-#define IS_NEG_PEAK(img, d, i) IS_PEAK(img, d, i, neg, <)
-
-/*! \def ADD_PEAK(img, d, i, dir, op)
- * \brief Builds the code for adding a local extremum.
- *
- * \param img image data
- * \param d image dimensions (int[3])
- * \param i index of point being checked
- * \param x
- * \param dir pos or neg
- * \param op > (for positive) or < (for negative)
- *
- * Assumes the containing scope includes variables:
- *
- * ix, iy, iz (x-, y-, z- of i, in pixel index space)
- * centerr, mmppixr, x, t
- * vt{dir}, m{dir}, n{dir}, p{dir}
- */
-#define ADD_PEAK(img, d, i, dir, op)					\
-  do {									\
-    float vx; /**< value at point x */					\
-    int slice; /**< slice most determining vx */			\
-    imgvalx_(img, d, d+1, d+2, centerr, mmppixr, x, &vx, &slice);	\
-    if (slice < 1) {							\
-      logmsg(LOG_UNDEF_POINT,						\
-	     "undefined imgvalx point %d %d %d", ix, iy, iz);		\
-      continue;								\
-    }									\
-    if (vt ## dir op vx) continue;					\
-    if (m ## dir <= n ## dir) {						\
-      m ## dir += MSIZE;						\
-      p ## dir = realloc(p ## dir, m ## dir * sizeof(EXTREMUM));	\
-	  if (!p ## dir)						\
-	    error_handler(ERROR_ALLOCATION, "extrema array update");	\
-	  for (k = 0; k < 3; k++) p ## dir[n ## dir].x[k] = x[k];	\
-      p ## dir[n ## dir].v = vx;					\
-	p ## dir[n ## dir].del2v = del2v;				\
-	  p ## dir[n ## dir].weight = 1.0;				\
-	    p ## dir[n ## dir].nvox = p ## dir[n ## dir].killed = 0;	\
-	      n ## dir++;						\
-    }									\
-  } while (0)
-
-#define ADD_POS_PEAK(img, d, i) ADD_PEAK(img, d, i, pos, >)
-#define ADD_NEG_PEAK(img, d, i) ADD_PEAK(img, d, i, neg, <)
-
-
 /**
  * Fills roi with a peaks mask built from img.
  *
@@ -426,6 +341,113 @@ static void build_mask(float *img, float *roi, int dim[3],
     }
   }
 }
+
+/*
+ * Exported functions
+ */
+
+/**
+ * Convolves the provided image in place with a sphere of the provided
+ * radius. Uses Avi's FORTRAN routine hsphere3d.
+ *
+ * @param image 3D image array
+ * @param dimensions (x,y,z) of image
+ * @param mmppixr mm/pixel for each dimension
+ * @param radius radius of blurring sphere, in mm
+ */
+void sphereblur(float* image, int dim[3], float mmppixr[3],
+		float radius) {
+  int i;
+  int pdim[3], psize = 1;
+
+  for (i = 0; i < 3; i++) {
+    int margin = 2.0 * radius / mmppixr[i];
+    pdim[i] = npad_(dim + i, &margin);
+    psize *= pdim[i];
+  }
+  logmsg(LOG_IMAGE_PADDING,
+	 "image dimensions %d %d %d padded to %d %d %d\n",
+	 dim[0], dim[1], dim[2], pdim[0], pdim[1], pdim[2]);
+  
+  float *padimage = calloc(psize, sizeof(float));
+  if (!padimage) {
+    error_handler(ERROR_ALLOCATION, "blur padding");
+  }
+  
+  imgpad_(image, dim, dim+1, dim+2, padimage, pdim, pdim+1, pdim+2);
+  hsphere3d_(padimage, pdim, pdim+1, pdim+2, mmppixr, &radius);
+  imgdap_(image, dim, dim+1, dim+2, padimage, pdim, pdim+1, pdim+2);
+}
+
+
+
+/*! \def IS_PEAK(img, d, i, dir, op)
+ * \brief Builds the test for whether this is a local extremum.
+ *
+ * \param img image data
+ * \param d image dimensions (int[3])
+ * \param i index of point being checked
+ * \param dir pos or neg
+ * \param op > (for positive) or < (for negative)
+ *
+ * Assumes the containing scope includes variables:
+ *
+ * del2v
+ * ct{dir}
+ */
+#define IS_PEAK(img, d, i, dir, op)				\
+  img[i] op 0.0 && del2v op ## = -ct ## dir			\
+    && img[i] op img[i-1]         && img[i] op img[i+1]		\
+    && img[i] op img[i-d[0]]      && img[i] op img[i+d[0]]	\
+    && img[i] op img[i-d[0]*d[1]] && img[i] op img[i+d[0]*d[1]]
+
+#define IS_POS_PEAK(img, d, i) IS_PEAK(img, d, i, pos, >)
+#define IS_NEG_PEAK(img, d, i) IS_PEAK(img, d, i, neg, <)
+
+/*! \def ADD_PEAK(img, d, i, dir, op)
+ * \brief Builds the code for adding a local extremum.
+ *
+ * \param img image data
+ * \param d image dimensions (int[3])
+ * \param i index of point being checked
+ * \param x
+ * \param dir pos or neg
+ * \param op > (for positive) or < (for negative)
+ *
+ * Assumes the containing scope includes variables:
+ *
+ * ix, iy, iz (x-, y-, z- of i, in pixel index space)
+ * centerr, mmppixr, x, t
+ * vt{dir}, m{dir}, n{dir}, p{dir}
+ */
+#define ADD_PEAK(img, d, i, dir, op)					\
+  do {									\
+    float vx; /**< value at point x */					\
+    int slice; /**< slice most determining vx */			\
+    imgvalx_(img, d, d+1, d+2, centerr, mmppixr, x, &vx, &slice);	\
+    if (slice < 1) {							\
+      logmsg(LOG_UNDEF_POINT,						\
+	     "undefined imgvalx point %d %d %d", ix, iy, iz);		\
+      continue;								\
+    }									\
+    if (vt ## dir op vx) continue;					\
+    if (m ## dir <= n ## dir) {						\
+      m ## dir += MSIZE;						\
+      p ## dir = realloc(p ## dir, m ## dir * sizeof(EXTREMUM));	\
+	  if (!p ## dir)						\
+	    error_handler(ERROR_ALLOCATION, "extrema array update");	\
+	  for (k = 0; k < 3; k++) p ## dir[n ## dir].x[k] = x[k];	\
+      p ## dir[n ## dir].v = vx;					\
+	p ## dir[n ## dir].del2v = del2v;				\
+	  p ## dir[n ## dir].weight = 1.0;				\
+	    p ## dir[n ## dir].nvox = p ## dir[n ## dir].killed = 0;	\
+	      n ## dir++;						\
+    }									\
+  } while (0)
+
+#define ADD_POS_PEAK(img, d, i) ADD_PEAK(img, d, i, pos, >)
+#define ADD_NEG_PEAK(img, d, i) ADD_PEAK(img, d, i, neg, <)
+
 
 
 /**
