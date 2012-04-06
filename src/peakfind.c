@@ -10,20 +10,16 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <varargs.h>
+#include <stdarg.h>
 
-/*
- * external fortran routines:
- * npad_(int *size, int *padded_size)
- * imgpad_(float *src, int*, int*, int*, float *dst, int*, int*, int*)
- * imgdap_(float *dst, int*, int*, int*, float *src, int*, int*, int*)
- */
+#include "rms.h"
+#include "4dfpf.h"
 
 typedef struct
 {
     float	x[3];		/**< location of peak */
-    float	v;
-    float	del2v;
+    float	v;		/**< value at peak */
+    float	del2v;		/**< Laplacian at peak */
     float	weight;
     int	nvox;
     int	killed;
@@ -56,7 +52,7 @@ static char *error_messages[] = {
  */
 static int verbosity = ~0;
 
-static void log(int option, char *message, ...) {
+static void logmsg(int option, char *message, ...) {
   va_list ap;
   
   va_start(ap, message);
@@ -96,34 +92,35 @@ void set_error_handler(void (*f)(int, const char *)) {
 }
 
 
-static void logpeaklist(EXTREMUM *plst, int nlst,
-			float mmppixr[3], float centerr[3],
-			int ntop, int nvox_flag) {
-  int i, k;
+static int logpeaklist(EXTREMUM *plst, int nlst,
+		       float mmppixr[3], float centerr[3],
+		       int ntop, int nvox_flag) {
+  int i, k, ntot = 0;
   float fndex[3];
   
-  log(LOG_PEAK_RESULTS, "%-5s%10s%10s%10s%10s%10s%10s%10s%10s%",
-      "ROI", "index_x", "index_y", "index_z",
-      "atlas_x", "atlas_y", "atlas_z", "value", "curvature");
+  logmsg(LOG_PEAK_RESULTS, "%-5s%10s%10s%10s%10s%10s%10s%10s%10s%",
+	 "ROI", "index_x", "index_y", "index_z",
+	 "atlas_x", "atlas_y", "atlas_z", "value", "curvature");
   if (nvox_flag) {
-    log(LOG_PEAK_RESULTS, "%10s", "nvox");
+    logmsg(LOG_PEAK_RESULTS, "%10s", "nvox");
   }
-  log(LOG_PEAK_RESULTS,"\n");
+  logmsg(LOG_PEAK_RESULTS,"\n");
   for (i = 0; i < ntop && i < nlst; i++) {
     if (plst[i].killed) continue;
     for (k = 0; k < 3; k++) {
       fndex[k] = (plst[i].x[k] + centerr[k]) / mmppixr[k];
     }
-    log(LOG_PEAK_RESULTS,
-	"%-5d%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.6f",
-	ntot++ + 1, fndex[0], fndex[1], fndex[2],
-	plst[i].x[0], plst[i].x[1], plst[i].x[2], plst[i].v,
-	-plst[i].del2v);
+    logmsg(LOG_PEAK_RESULTS,
+	   "%-5d%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.6f",
+	   ntot++ + 1, fndex[0], fndex[1], fndex[2],
+	   plst[i].x[0], plst[i].x[1], plst[i].x[2], plst[i].v,
+	   -plst[i].del2v);
     if (nvox_flag) {
-      log(LOG_PEAK_RESULTS, "%10d", plst[i].nvox);
+      logmsg(LOG_PEAK_RESULTS, "%10d", plst[i].nvox);
     }
-    log(LOG_PEAK_RESULTS, "\n");
+    logmsg(LOG_PEAK_RESULTS, "\n");
   }
+  return ntot;
 }
 
 /**
@@ -135,7 +132,7 @@ static void logpeaklist(EXTREMUM *plst, int nlst,
  * @param mmppixr mm/pixel for each dimension
  * @param radius radius of blurring sphere, in mm
  */
-void sphereblur(float* image, int dim[3], double mmppixr[3],
+void sphereblur(float* image, int dim[3], float mmppixr[3],
 		float radius) {
   int i;
   int pdim[3], psize = 1;
@@ -145,10 +142,9 @@ void sphereblur(float* image, int dim[3], double mmppixr[3],
     pdim[i] = npad_(dim + i, &margin);
     psize *= pdim[i];
   }
-  log(LOG_IMAGE_PADDING,
-      "image dimensions %d %d %d padded to %d %d %d\n",
-      dim[0], dim[1], dim[2], pdim[0], pdim[1], pdim[2]);
-  }
+  logmsg(LOG_IMAGE_PADDING,
+	 "image dimensions %d %d %d padded to %d %d %d\n",
+	 dim[0], dim[1], dim[2], pdim[0], pdim[1], pdim[2]);
   
   float *padimage = calloc(psize, sizeof(float));
   if (!padimage) {
@@ -163,10 +159,10 @@ void sphereblur(float* image, int dim[3], double mmppixr[3],
 
 /* value ordering for extrema */
 static int pcompare(const void *ptr1, const void *ptr2) {
-  EXTREMUM *p1 = ptr1, *p2 = ptr2;
+  const EXTREMUM *p1 = ptr1, *p2 = ptr2;
   if (p1->v == p2->v) {
     return 0;
-  } else if (fabs(p1-v) > fabs(p2->v)) {
+  } else if (fabs(p1->v) > fabs(p2->v)) {
     return -1;
   } else {
     return 1;
@@ -203,9 +199,9 @@ static float pdist2(EXTREMUM *p1, EXTREMUM *p2) {
  * @param nneg number of negative peaks
  * @return number of combined peaks (i.e., size of *ppall)
  */
-static int combine_extrema(float **ppall,
-			   float *ppos, int npos,
-			   float *pneg, int nneg) {
+static int combine_extrema(EXTREMUM **ppall,
+			   EXTREMUM *ppos, int npos,
+			   EXTREMUM *pneg, int nneg) {
   int i, nall = 0;
   for (i = 0; i < npos; i++) {
     if (!ppos[i].killed) nall++;
@@ -222,12 +218,12 @@ static int combine_extrema(float **ppall,
       error_handler(ERROR_ALLOCATION, "peak combination");
     }
 
-    for (int i = 0; i < npos; i++) {
+    for (i = 0; i < npos; i++) {
       if (!ppos[i].killed) {
 	*ppall[iall++] = ppos[i];
       }
     }
-    for (int i = 0; i < nneg; i++) {
+    for (i = 0; i < nneg; i++) {
       if (!pneg[i].killed) {
 	*ppall[iall++] = ppos[i];
       }
@@ -250,7 +246,7 @@ static int combine_extrema(float **ppall,
 static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
   int npair;
   do {
-    float d2min = MAXFLOAT;
+    float d2min = HUGE_VALF;
     int i, j, imin, jmin;
 
     /* On each pass, if any peaks are within threshold distance of
@@ -262,20 +258,20 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
 
     /* Look for the closest within-threshold pair, if any */
     npair = 0;
-    log(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm:\n",
-	sqrt(d2thresh));
+    logmsg(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm:\n",
+	   sqrt(d2thresh));
     for (i = 0; i < nlst; i++) {
       if (plst[i].killed) continue;
       for (j = i + 1; j < nlst; j++) {
-	float t2;
+	float d2;
 	if (plst[j].killed) continue;
-	t2 = pdist2(plst + i, plst + j);
-	if (t2 < d2thresh) {
-	  log(LOG_PEAK_RESULTS, "%5d%5d%10.4f\n", i + 1, j + 1, t2);
-	  if (t2 < d2min) {
+	d2 = pdist2(plst + i, plst + j);
+	if (d2 < d2thresh) {
+	  logmsg(LOG_PEAK_RESULTS, "%5d%5d%10.4f\n", i + 1, j + 1, d2);
+	  if (d2 < d2min) {
 	    imin = i;
 	    jmin = j;
-	    d2min = t2;
+	    d2min = d2;
 	  }
 	  npair++;
 	}
@@ -285,7 +281,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
     /* If any peak pairs were within threshold, consolidate the
      * closest pair.
      */
-    log(LOG_PEAK_RESULTS, "npair = %d\n", npair);
+    logmsg(LOG_PEAK_RESULTS, "npair = %d\n", npair);
     if (npair > 0) {
       int k;
       float x[3];
@@ -320,7 +316,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
  * ct{dir}
  */
 #define IS_PEAK(img, d, i, dir, op) \
-  img[i] op 0.0 && del2v op##= -ct##dir \
+  img[i] op 0.0 && del2v op ## = -ct ## dir \
     && img[i] op img[i-1]         && img[i] op img[i+1] \
     && img[i] op img[i-d[0]]      && img[i] op img[i+d[0]] \
     && img[i] op img[i-d[0]*d[1]] && img[i] op img[i+d[0]*d[1]]
@@ -334,34 +330,40 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
  * \param img image data
  * \param d image dimensions (int[3])
  * \param i index of point being checked
+ * \param x
  * \param dir pos or neg
  * \param op > (for positive) or < (for negative)
  *
  * Assumes the containing scope includes variables:
  *
  * ix, iy, iz (x-, y-, z- of i, in pixel index space)
- * centerr, mmppixr, x, t, l
+ * centerr, mmppixr, x, t
  * vt{dir}, m{dir}, n{dir}, p{dir}
  */
-#define ADD_PEAK(img, d, i, dir, op) \
-  imgvalx_(img, d, d+1, d+2, centerr, mmppixr, x, &t, &l); \
-  if (l < 1) { \
-    log(LOG_UNDEF_POINT, "undefined imgvalx point %d %d %d", ix, iy, iz); \
-    continue; \
-  } \
-  if (vt##dir op t) continue; \
-  if (m##dir <= n##dir) { \
-    m##dir += MSIZE; \
-    p##dir = realloc(p##dir, m##dir * sizeof(EXTREMUM)); \
-    if (!p##dir)
-      error_handler(ERROR_ALLOCATION, "extrema array update"); \
-    for (k = 0; k < 3; k++) p##dir[n##dir].x[k] = x[k]; \
-    p##dir[n##dir].v = t; \
-    p##dir[n##dir].del2v = del2v; \
-    p##dir[n##dir].weight = 1.0; \
-    p##dir[n##dir].nvox = p##dir[n##dir].killed = 0; \
-    n##dir++; \
-  }
+#define ADD_PEAK(img, d, i, dir, op)					\
+  do {									\
+    float vx; /**< value at point x */					\
+    int slice; /**< slice most determining vx */			\
+    imgvalx_(img, d, d+1, d+2, centerr, mmppixr, x, &vx, &slice);	\
+    if (slice < 1) {							\
+      logmsg(LOG_UNDEF_POINT,						\
+	     "undefined imgvalx point %d %d %d", ix, iy, iz);		\
+      continue;								\
+    }									\
+    if (vt ## dir op vx) continue;					\
+    if (m ## dir <= n ## dir) {						\
+      m ## dir += MSIZE;						\
+      p ## dir = realloc(p ## dir, m ## dir * sizeof(EXTREMUM));	\
+	  if (!p ## dir)						\
+	    error_handler(ERROR_ALLOCATION, "extrema array update");	\
+	  for (k = 0; k < 3; k++) p ## dir[n ## dir].x[k] = x[k];	\
+      p ## dir[n ## dir].v = vx;					\
+	p ## dir[n ## dir].del2v = del2v;				\
+	  p ## dir[n ## dir].weight = 1.0;				\
+	    p ## dir[n ## dir].nvox = p ## dir[n ## dir].killed = 0;	\
+	      n ## dir++;						\
+    }									\
+  } while (0)
 
 #define ADD_POS_PEAK(img, d, i) ADD_PEAK(img, d, i, pos, >)
 #define ADD_NEG_PEAK(img, d, i) ADD_PEAK(img, d, i, neg, <)
@@ -372,7 +374,6 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
  *
  * @param img original 3D image
  * @param roi output mask image: img where close to peak, 0 elsewhere
- * @param mask optional mask to apply to ROI (null if none)
  * @param dim dimensions of roi and (optional) mask
  * @param ppos array of local maxima
  * @param npos size of ppos
@@ -381,41 +382,41 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
  * @param mmppixr mm/pixel for each dimension
  * @param centerr location offset, in mm
  * @param orad radius of peak spheres
+ * @param polarize if true, include only maxima at positive values
+ *                 and minima at negative values
  */
-void build_mask(float *img, float *mask, float *roi, int dim[3],
-		EXTREMUM pall[], int nall,
-		float mmppixr[3], float centerr[3],
-		float orad) {
+static void build_mask(float *img, float *roi, int dim[3],
+		       EXTREMUM pall[], int nall,
+		       float mmppixr[3], float centerr[3],
+		       float orad,
+		       int polarize) {
   const float orad2 = orad * orad;
   EXTREMUM p;			/**< location (ix,iy,iz) */
   int i = 0, ix, iy, iz;
   
-  // TODO: throw out local minima in positive territory,
-  // local maxima in negative territory
-
   for (iz = 0; iz < dim[2]; iz++) {
     p.x[2] = (iz + 1) * mmppixr[2] - centerr[2];
     for (iy = 0; iy < dim[1]; iy++) {
       p.x[1] = (iy + 1) * mmppixr[1] - centerr[1];
       for (ix = 0; ix < dim[0]; ix++, i++) {
-	float d2min = MAXFLOAT;
-	int ip, ipmin, k;
-	float tmin;
+	float d2min = HUGE_VALF;
+	int ip, ipmin;
 
 	p.x[0] = (ix + 1) * mmppixr[0] - centerr[0];
 
 	/* find the closest peak to (ix,iy,iz) */
 	for (ip = 0; ip < nall; ip++) {
-	  float t2 = pdist2(&p, pall + ip);
-	  if (t2 < d2min) {
+	  float d2 = pdist2(&p, pall + ip);
+	  if (d2 < d2min) {
 	    ipmin = ip;
-	    d2min = t2;
+	    d2min = d2;
 	  }
 	}
 
 	/* if the closest peak is within orad, mark this point. */
-	/* TODO: check with Avi on mask values, 1e-37 comparison */
-	if (d2min < orad2 && (!mask || fabs(mask[i]) > 1.0e-37))
+	if (d2min < orad2 &&
+	    (!polarize ||
+	     (signbit(img[i]) != signbit(pall[ipmin].del2v)))) {
 	  roi[i] = img[i];
 	  pall[ipmin].nvox++;
 	} else {
@@ -425,6 +426,7 @@ void build_mask(float *img, float *mask, float *roi, int dim[3],
     }
   }
 }
+
 
 /**
  * Find peaks in the provided 3d image.
@@ -440,15 +442,23 @@ void build_mask(float *img, float *mask, float *roi, int dim[3],
  * @param dthresh peak distance threshold: if two peaks are
  *                within dthresh of each other, they are consolidated
  *                into a single, stronger peak
+ * @param roi 3D image space for output peaks mask
+ * @param orad radius for peak spheres in roi
+ * @param polarize_roi if nonzero, include in the ROI only maxima at
+ *                     positive values and minima at negative values
  */
 void find_peaks(float *image, int dim[3],
 		float mmppixr[3], float centerr[3],
-		float vtneg, float vtpos, float ctneg, float ctpos,
-		float dthresh) {
+		float vtneg, float vtpos,
+		float ctneg, float ctpos,
+		float dthresh,
+		float *roi, float orad,
+		int polarize_roi) {
   EXTREMUM *ppos, *pneg, *pall;	/**< local maxima, minima, all extrema */
   int npos = 0, nneg = 0, nall;	/**< number of maxima, minima, extrema */
   int mpos = MSIZE, mneg = MSIZE; /**< array allocation sizes */
-  int iz, iy, ix;
+  int i, iz, iy, ix, nx = dim[0], nxy = dim[0]*dim[1];
+  const float d2thresh = dthresh * dthresh;
 
   ppos = malloc(mpos * sizeof(EXTREMUM));
   if (!ppos) {
@@ -459,17 +469,18 @@ void find_peaks(float *image, int dim[3],
     error_handler(ERROR_ALLOCATION, "negative extremum array");
   }
 
-  log(LOG_PEAK_PARAMS,
-      "peak value     thresholds %10.4f to %10.4f\n", vtneg, vtpos);
-  log(LOG_PEAK_PARAMS,
-      "peak curvature thresholds %10.4f to %10.4f\n", ctneg, ctpos);
-  log(LOG_PEAK_TRACE, "compiling extrema slice");
+  logmsg(LOG_PEAK_PARAMS,
+	 "peak value     thresholds %10.4f to %10.4f\n", vtneg, vtpos);
+  logmsg(LOG_PEAK_PARAMS,
+	 "peak curvature thresholds %10.4f to %10.4f\n", ctneg, ctpos);
+  logmsg(LOG_PEAK_TRACE, "compiling extrema slice");
 
-  int i = 0;
+  i = 0;
   for (iz = 0; iz < dim[2] - 1; iz++) {
     for (iy = 1; iy < dim[1] - 1; iy++) {
       for (ix = 1; ix < dim[0] - 1; ix++, i++) {
-	float del2v = 0.0, dvdx[3], d2vdx2[3], w[3], fndex[3];
+	int k;
+	float del2v = 0.0, dvdx[3], d2vdx2[3], w[3], fndex[3], x[3];
 	
 	dvdx[0] = (-image[i - 1] + image[i + 1]) / 2.0;
 	dvdx[1] = (-image[i - nx] + image[i + nx]) / 2.0;
@@ -492,16 +503,16 @@ void find_peaks(float *image, int dim[3],
 	}
 
 	if (IS_POS_PEAK(image, dim, i)) {
-	  MAKE_POS_PEAK;
+	  ADD_POS_PEAK(image, dim, i);
 	} else if (IS_NEG_PEAK(image, dim, i)) {
-	  MAKE_NEG_PEAK;
+	  ADD_NEG_PEAK(image, dim, i);
 	}
       }
     }
   }
 
-  log(LOG_PEAK_TRACE, "\nbefore sorting npos = %d nneg = %d\n",
-      npos, nneg);
+  logmsg(LOG_PEAK_TRACE, "\nbefore sorting npos = %d nneg = %d\n",
+	 npos, nneg);
 
   /* Sort by value, then consolidate nearby extrema */
   qsort(ppos, npos, sizeof(EXTREMUM), pcompare);
@@ -509,13 +520,15 @@ void find_peaks(float *image, int dim[3],
   qsort(pneg, nneg, sizeof(EXTREMUM), pcompare);
   consolidate(pneg, nneg, d2thresh);
 
+  /* print the list of peaks */
   logpeaklist(ppos, npos, mmppixr, centerr, NTOP, 1);
   logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 1);
 
   nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
   if (orad > 0) {
-    build_mask(imgdata, null, roi, dim, pall, nall,
-	       mmppixr, centerr, orad);
+    /* build a mask of spheres centered on the distinct extrema */
+    build_mask(image, roi, dim, pall, nall,
+	       mmppixr, centerr, orad, polarize_roi);
   }
 
   free(ppos);
