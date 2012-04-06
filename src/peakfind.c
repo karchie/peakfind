@@ -43,9 +43,11 @@ static const unsigned int NTOP = 1000;
  * error types
  */
 static const int ERROR_ALLOCATION = 0;
+static const int ERROR_NO_PEAK = 1;
 
 static char *error_messages[] = {
   "FATAL: memory allocation error",
+  "FATAL: no peaks found",
 };
 
 /**
@@ -320,11 +322,13 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
   } while (npair > 0);
 }
 
+#define UNMASKED(mask, i) (!mask || (fabs(mask[i]) > 1.0e-37))
 
 /**
  * Fills roi with a peaks mask built from img.
  *
  * @param img original 3D image
+ * @param mask statistical significance mask for constraining valid peaks
  * @param roi output mask image: img where close to peak, 0 elsewhere
  * @param dim dimensions of roi and (optional) mask
  * @param ppos array of local maxima
@@ -337,7 +341,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
  * @param polarize if true, include only maxima at positive values
  *                 and minima at negative values
  */
-static void build_mask(float *img, float *roi, int dim[3],
+static void build_mask(float *img, float *mask, float *roi, int dim[3],
 		       EXTREMUM pall[], int nall,
 		       float mmppixr[3], float centerr[3],
 		       float orad,
@@ -352,7 +356,7 @@ static void build_mask(float *img, float *roi, int dim[3],
       p.x[1] = (iy + 1) * mmppixr[1] - centerr[1];
       for (ix = 0; ix < dim[0]; ix++, i++) {
 	float d2min = HUGE_VALF;
-	int ip, ipmin;
+	int ip, ipmin = -1;
 
 	p.x[0] = (ix + 1) * mmppixr[0] - centerr[0];
 
@@ -365,14 +369,59 @@ static void build_mask(float *img, float *roi, int dim[3],
 	  }
 	}
 
+	if (ipmin < 0) {
+	  error_handler(ERROR_NO_PEAK, "building ROI mask");
+	}
+
 	/* if the closest peak is within orad, mark this point. */
-	if (d2min < orad2 &&
+	if (d2min < orad2 && UNMASKED(mask, i) &&
 	    (!polarize ||
 	     (signbit(img[i]) != signbit(pall[ipmin].del2v)))) {
 	  roi[i] = img[i];
 	  pall[ipmin].nvox++;
 	} else {
 	  roi[i] = 0.0;
+	}
+      }
+    }
+  }
+}
+
+static int kill_small_extrema(float *image, float *mask,
+			      int dim[3],
+			      EXTREMUM *pall, int nall,
+			      int orad, int min_vox) {
+  const int orad2 = orad * orad;
+  int iz, iy, ix, i;
+  float fndex[3];
+  EXTREMUM loc;
+
+  if (min_vox <= 0) {
+    return 0;
+  }
+
+  i = 0;
+  for (iz = 0; iz < dim[2]; iz++) {
+    loc.x[2] = (iz + 1)*mmppixr[2] - centerr[2];
+    for (iy = 0; iy < dim[1]; iy++) {
+      loc.x[1] = (iy + 1)*mmppixr[1] - centerr[1];
+      for (ix = 0; ix < dim[0]; ix++, i++) {
+	int ip, ipmin = -1;
+	float d2min = HUGE_VALF;
+
+	loc.x[0] = (ix + 1)*mmppixr[0] - centerr[0];
+	for (ip = 0; ip < nall; ip++) {
+	  d2 = pdist2(&loc, pall + ip);
+	  if (d2 < d2min) {
+	    ipmin = ip;
+	    d2min = d2;
+	  }
+	}
+	if (ipmin < 0) {
+	  error_handler(ERROR_NO_PEAK, "building ROI mask");
+	}
+	if (d2min < orad2 && UNMASKED(mask, i)) {
+	  pall[ipmin].nvox++;
 	}
       }
     }
@@ -505,6 +554,7 @@ void sphereblur(float* image, int dim[3], float mmppixr[3],
  * @param orad radius for peak spheres in roi
  * @param polarize_roi if nonzero, include in the ROI only maxima at
  *                     positive values and minima at negative values
+ * @param statmask statistical significance mask
  */
 void find_peaks(float *image, int dim[3],
 		float mmppixr[3], float centerr[3],
@@ -512,7 +562,8 @@ void find_peaks(float *image, int dim[3],
 		float ctneg, float ctpos,
 		float dthresh,
 		float *roi, float orad,
-		int polarize_roi) {
+		int polarize_roi,
+		float *statmask) {
   EXTREMUM *ppos, *pneg, *pall;	/**< local maxima, minima, all extrema */
   int npos = 0, nneg = 0, nall;	/**< number of maxima, minima, extrema */
   int mpos = MSIZE, mneg = MSIZE; /**< array allocation sizes */
@@ -584,9 +635,10 @@ void find_peaks(float *image, int dim[3],
   logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 1);
 
   nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
+
   if (orad > 0) {
     /* build a mask of spheres centered on the distinct extrema */
-    build_mask(image, roi, dim, pall, nall,
+    build_mask(image, statmask, roi, dim, pall, nall,
 	       mmppixr, centerr, orad, polarize_roi);
   }
 
