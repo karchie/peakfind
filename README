@@ -10,4 +10,4 @@ Uses Fortran subroutines from the 4dfp suite:
 
 gauss_4dfp: hsphere3d
 imgreg_4dfp: imgvalx
-librms: fft, realt (in fftsol)
+librms: fftsol, imgpad, polfit
