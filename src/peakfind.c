@@ -44,12 +44,12 @@ static const unsigned int NTOP = 1000;
 /*
  * error types
  */
-static const int ERROR_ALLOCATION = 0;
-static const int ERROR_NO_PEAK = 1;
+#define ERROR_FATAL 0x0001
+static const int ERROR_ALLOCATION = 0x0002 | ERROR_FATAL;
 
 static char *error_messages[] = {
+    0, 0, 0,
     "FATAL: memory allocation error",
-    "FATAL: no peaks found",
 };
 
 /**
@@ -127,7 +127,9 @@ static void default_error(int type, const char *message) {
         fprintf(stderr, ": %s", message);
     }
     fputs("\n", stderr);
-    exit(type);
+    if (type & ERROR_FATAL) {
+        exit(type);
+    }
 }
 
 static void (*error_handler)(int, const char *) = default_error;
@@ -140,8 +142,8 @@ void peakf_set_error_handler(void (*f)(int, const char *)) {
  * utilities
  */
 
-static int logpeaklist(EXTREMUM *plst, int nlst,
-                       float mmppixr[3], float centerr[3],
+static int logpeaklist(const EXTREMUM *plst, int nlst,
+                       const float mmppixr[3], const float centerr[3],
                        int ntop, int nvox_flag) {
     int i, k, ntot = 0;
     float fndex[3];
@@ -200,7 +202,7 @@ static int pcompare(const void *ptr1, const void *ptr2) {
  * @param p2 pointer to peak 2
  * @return square of distance between p1 and p2
  */
-static float pdist2(EXTREMUM *p1, EXTREMUM *p2) {
+static float pdist2(const EXTREMUM *p1, const EXTREMUM *p2) {
     int k;
     float q = 0.0;
   
@@ -253,6 +255,8 @@ static int combine_extrema(EXTREMUM **ppall,
             }
         }
         assert(iall == nall);
+    } else {
+        *ppall = 0;
     }
     return nall;
 }
@@ -342,14 +346,20 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
  * @param centerr location offset, in mm
  * @param orad radius of peak spheres
  */
-static void build_mask(float *img, float *mask, float *roi, int dim[3],
-                       float mmppixr[3], float centerr[3],
-                       EXTREMUM pall[], int nall,
+static void build_mask(const float *img, const float *mask,
+                       float *roi, const int dim[3],
+                       const float mmppixr[3], const float centerr[3],
+                       const EXTREMUM *pall, int nall,
                        float orad) {
     const float orad2 = orad * orad;
     EXTREMUM loc;             /**< location (ix,iy,iz) in image space */
     int ix, iy, iz, i;
-  
+
+    if (0 == nall) {
+        fputs("no peaks, skipping ROI mask construction\n", stdout);
+        return;
+    }
+
     i = 0;
     for (iz = 0; iz < dim[2]; iz++) {
         loc.x[2] = (iz + 1) * mmppixr[2] - centerr[2];
@@ -370,9 +380,7 @@ static void build_mask(float *img, float *mask, float *roi, int dim[3],
                     }
                 }
 
-                if (ipmin < 0) {
-                    error_handler(ERROR_NO_PEAK, "building ROI mask");
-                }
+                assert(ipmin >= 0);
 
                 /* if the closest peak is within orad, mark this point. */
                 if (d2min < orad2 && UNMASKED(mask, i)) {
@@ -403,8 +411,10 @@ static void build_mask(float *img, float *mask, float *roi, int dim[3],
  *                 and minima at negative values
  * @return number of culled peaks
  */
-static int cull_small_extrema(float *img, float *mask, int dim[3],
-                              float mmppixr[3], float centerr[3],
+static int cull_small_extrema(const float *img, const float *mask,
+                              const int dim[3],
+                              const float mmppixr[3],
+                              const float centerr[3],
                               EXTREMUM **pallp, int *nallp,
                               int orad, int min_vox, int polarize) {
     const int orad2 = orad * orad;
@@ -412,6 +422,10 @@ static int cull_small_extrema(float *img, float *mask, int dim[3],
     EXTREMUM loc;
 
     if (min_vox <= 0) {
+        return 0;
+    }
+    if (0 == *nallp){
+        fputs("no peaks found, skipping small peak cull\n", stderr);
         return 0;
     }
 
@@ -434,9 +448,8 @@ static int cull_small_extrema(float *img, float *mask, int dim[3],
                         d2min = d2;
                     }
                 }
-                if (ipmin < 0) {
-                    error_handler(ERROR_NO_PEAK, "culling small peaks");
-                }
+                assert(ipmin >= 0);
+
                 if (d2min < orad2 && UNMASKED(mask, i) &&
                     (!polarize ||
                      (signbit(img[i]) != signbit((*pallp)[ipmin].del2v)))) {
@@ -491,28 +504,30 @@ static int cull_small_extrema(float *img, float *mask, int dim[3],
  * @param mmppixr mm/pixel for each dimension
  * @param radius radius of blurring sphere, in mm
  */
-void sphereblur(float* image, int dim[3], float mmppixr[3],
-                float radius) {
+void sphereblur(float* image, const int dim[3],
+                const float mmppixr[3], float radius) {
     int i;
     int pdim[3], psize = 1;
+    int *vdim = (int*)dim;      /* really we don't change this */
+    float *mmpvox = (float*)mmppixr;
 
     for (i = 0; i < 3; i++) {
         int margin = 2.0 * radius / mmppixr[i];
-        pdim[i] = npad_(dim + i, &margin);
+        pdim[i] = npad_((int*)dim + i, &margin);
         psize *= pdim[i];
     }
     logmsg(LOG_IMAGE_PADDING,
            "image dimensions %d %d %d padded to %d %d %d\n",
-           dim[0], dim[1], dim[2], pdim[0], pdim[1], pdim[2]);
+           vdim[0], vdim[1], vdim[2], pdim[0], pdim[1], pdim[2]);
   
     float *padimage = calloc(psize, sizeof(float));
     if (!padimage) {
         error_handler(ERROR_ALLOCATION, "blur padding");
     }
   
-    imgpad_(image, dim, dim+1, dim+2, padimage, pdim, pdim+1, pdim+2);
-    hsphere3d_(padimage, pdim, pdim+1, pdim+2, mmppixr, &radius);
-    imgdap_(image, dim, dim+1, dim+2, padimage, pdim, pdim+1, pdim+2);
+    imgpad_(image, vdim, vdim+1, vdim+2, padimage, pdim, pdim+1, pdim+2);
+    hsphere3d_(padimage, pdim, pdim+1, pdim+2, mmpvox, &radius);
+    imgdap_(image, vdim, vdim+1, vdim+2, padimage, pdim, pdim+1, pdim+2);
 }
 
 
@@ -560,7 +575,8 @@ void sphereblur(float* image, int dim[3], float mmppixr[3],
     do {                                                                \
         float vx; /**< value at point x */                              \
         int slice; /**< slice most determining vx */                    \
-        imgvalx_(img, d, d+1, d+2, centerr, mmppixr, x, &vx, &slice);   \
+        imgvalx_(img, (int*)d, (int*)d+1, (int*)d+2,                    \
+                 (float*)centerr, (float*)mmppixr, x, &vx, &slice);     \
         if (slice < 1) {                                                \
             logmsg(LOG_UNDEF_POINT,                                     \
                    "undefined imgvalx point %d %d %d", ix, iy, iz);     \
@@ -607,14 +623,14 @@ void sphereblur(float* image, int dim[3], float mmppixr[3],
  *                     positive values and minima at negative values
  * @param statmask statistical significance mask
  */
-void find_peaks(float *image, int dim[3],
-                float mmppixr[3], float centerr[3],
+void find_peaks(float *image, const int dim[3],
+                const float mmppixr[3], const float centerr[3],
                 float vtneg, float vtpos,
                 float ctneg, float ctpos,
                 float dthresh,
                 float *roi, float orad,
                 int min_vox, int polarize_roi,
-                float *statmask) {
+                const float *statmask) {
     EXTREMUM *ppos, *pneg, *pall;        /**< local maxima, minima, all extrema */
     int npos = 0, nneg = 0, nall;        /**< number of maxima, minima, extrema */
     int mpos = MSIZE, mneg = MSIZE; /**< array allocation sizes */
@@ -636,12 +652,13 @@ void find_peaks(float *image, int dim[3],
            "peak curvature thresholds %10.4f to %10.4f\n", ctneg, ctpos);
     logmsg(LOG_PEAK_TRACE, "compiling extrema slice");
 
-    i = 0;
     for (iz = 0; iz < dim[2] - 1; iz++) {
         for (iy = 1; iy < dim[1] - 1; iy++) {
-            for (ix = 1; ix < dim[0] - 1; ix++, i++) {
+            for (ix = 1; ix < dim[0] - 1; ix++) {
                 int k;
                 float del2v = 0.0, dvdx[3], d2vdx2[3], w[3], fndex[3], x[3];
+
+                i = ix + dim[1] * (iy + dim[2] * iz);
         
                 dvdx[0] = (-image[i - 1] + image[i + 1]) / 2.0;
                 dvdx[1] = (-image[i - nx] + image[i + nx]) / 2.0;
@@ -697,5 +714,7 @@ void find_peaks(float *image, int dim[3],
 
     free(ppos);
     free(pneg);
-    free(pall);
+    if (nall > 0) {
+        free(pall);
+    }
 }

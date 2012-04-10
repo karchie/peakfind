@@ -19,15 +19,15 @@ extern void peakf_set_log(int should);
 
 extern void peakf_set_error_handler(void (*)(int, const char*));
 
-extern void sphereblur(float *image, int dim[3],
-                       float mmppixr[3], float radius);
+extern void sphereblur(float *image, const int dim[3],
+                       const float mmppixr[3], float radius);
 
-extern void find_peaks(float *image, int dim[3],
-                       float mmppixr[3], float centerr[3],
+extern void find_peaks(float *image, const int dim[3],
+                       const float mmppixr[3], const float centerr[3],
                        float vtneg, float vtpos,
                        float ctneg, float ctpos,
                        float dthresh,
                        float *roi, float orad,
                        int min_vox, int polarize_roi,
-                       float *statmask);
+                       const float *statmask);
 #endif
