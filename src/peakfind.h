@@ -3,6 +3,8 @@
  * Declarations for peak finder
  * Copyright (c) 2012 Washington University
  * Author: Kevin A. Archie <karchie@wustl.edu>
+ *
+ * emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  */
 
 #ifndef _PEAKFIND_H_
@@ -18,13 +20,14 @@ extern void peakf_set_log(int should);
 extern void peakf_set_error_handler(void (*)(int, const char*));
 
 extern void sphereblur(float *image, int dim[3],
-		       float mmppixr[3], float radius);
+                       float mmppixr[3], float radius);
 
 extern void find_peaks(float *image, int dim[3],
-		       float mmppixr[3], float centerr[3],
-		       float vtneg, float vtpos,
-		       float ctneg, float ctpos,
-		       float dthresh,
-		       float *roi, float orad,
-		       int polarize_roi);
+                       float mmppixr[3], float centerr[3],
+                       float vtneg, float vtpos,
+                       float ctneg, float ctpos,
+                       float dthresh,
+                       float *roi, float orad,
+                       int min_vox, int polarize_roi,
+                       float *statmask);
 #endif
