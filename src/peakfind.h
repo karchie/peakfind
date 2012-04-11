@@ -28,6 +28,5 @@ extern void find_peaks(float *image, const int dim[3],
                        float ctneg, float ctpos,
                        float dthresh,
                        float *roi, float orad,
-                       int min_vox, int polarize_roi,
-                       const float *statmask);
+                       int min_vox, const float *statmask);
 #endif

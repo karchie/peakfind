@@ -246,12 +246,12 @@ static int combine_extrema(EXTREMUM **ppall,
 
         for (i = 0; i < npos; i++) {
             if (!ppos[i].killed) {
-                *ppall[iall++] = ppos[i];
+                (*ppall)[iall++] = ppos[i];
             }
         }
         for (i = 0; i < nneg; i++) {
             if (!pneg[i].killed) {
-                *ppall[iall++] = ppos[i];
+                (*ppall)[iall++] = pneg[i];
             }
         }
         assert(iall == nall);
@@ -407,8 +407,6 @@ static void build_mask(const float *img, const float *mask,
  * @param centerr center coordinate location in mm
  * @param orad radius of ROI spheres
  * @param min_vox minimum voxel count for retained ROIs
- * @param polarize if true, include only maxima at positive values
- *                 and minima at negative values
  * @return number of culled peaks
  */
 static int cull_small_extrema(const float *img, const float *mask,
@@ -416,7 +414,7 @@ static int cull_small_extrema(const float *img, const float *mask,
                               const float mmppixr[3],
                               const float centerr[3],
                               EXTREMUM **pallp, int *nallp,
-                              int orad, int min_vox, int polarize) {
+                              int orad, int min_vox) {
     const int orad2 = orad * orad;
     int iz, iy, ix, i, nkilled = 0;
     EXTREMUM loc;
@@ -450,9 +448,7 @@ static int cull_small_extrema(const float *img, const float *mask,
                 }
                 assert(ipmin >= 0);
 
-                if (d2min < orad2 && UNMASKED(mask, i) &&
-                    (!polarize ||
-                     (signbit(img[i]) != signbit((*pallp)[ipmin].del2v)))) {
+                if (d2min < orad2 && UNMASKED(mask, i)) {
                     (*pallp)[ipmin].nvox++;
                 }
             }
@@ -547,7 +543,7 @@ void sphereblur(float* image, const int dim[3],
  * ct{dir}
  */
 #define IS_PEAK(img, d, i, dir, op)                                     \
-    img[i] op 0.0 && del2v op ## = -ct ## dir                           \
+    img[i] op 0.0 && -ct ## dir op ## = del2v                           \
         && img[i] op img[i-1]         && img[i] op img[i+1]             \
         && img[i] op img[i-d[0]]      && img[i] op img[i+d[0]]          \
         && img[i] op img[i-d[0]*d[1]] && img[i] op img[i+d[0]*d[1]]
@@ -585,16 +581,16 @@ void sphereblur(float* image, const int dim[3],
         if (vt ## dir op vx) continue;                                  \
         if (m ## dir <= n ## dir) {                                     \
             m ## dir += MSIZE;                                          \
-                p ## dir = realloc(p ## dir, m ## dir * sizeof(EXTREMUM)); \
-                    if (!p ## dir)                                      \
-                        error_handler(ERROR_ALLOCATION, "extrema array update"); \
-                    for (k = 0; k < 3; k++) p ## dir[n ## dir].x[k] = x[k]; \
-            p ## dir[n ## dir].v = vx;                                  \
-                p ## dir[n ## dir].del2v = del2v;                       \
-                    p ## dir[n ## dir].weight = 1.0;                    \
-                        p ## dir[n ## dir].nvox = p ## dir[n ## dir].killed = 0; \
-                            n ## dir++;                                 \
+            p ## dir = realloc(p ## dir, m ## dir * sizeof(EXTREMUM));  \
+            if (!p ## dir)                                              \
+                error_handler(ERROR_ALLOCATION, "extrema array update"); \
         }                                                               \
+        for (k = 0; k < 3; k++) p ## dir[n ## dir].x[k] = x[k];         \
+        p ## dir[n ## dir].v = vx;                                      \
+        p ## dir[n ## dir].del2v = del2v;                               \
+        p ## dir[n ## dir].weight = 1.0;                                \
+        p ## dir[n ## dir].nvox = p ## dir[n ## dir].killed = 0;        \
+        n ## dir++;                                                     \
     } while (0)
 
 #define ADD_POS_PEAK(img, d, i) ADD_PEAK(img, d, i, pos, >)
@@ -619,8 +615,6 @@ void sphereblur(float* image, const int dim[3],
  * @param roi 3D image space for output peaks mask
  * @param orad radius for peak spheres in roi
  * @param min_vox minimum voxel count for peak ROIs
- * @param polarize_roi if nonzero, include in the ROI only maxima at
- *                     positive values and minima at negative values
  * @param statmask statistical significance mask
  */
 void find_peaks(float *image, const int dim[3],
@@ -629,14 +623,16 @@ void find_peaks(float *image, const int dim[3],
                 float ctneg, float ctpos,
                 float dthresh,
                 float *roi, float orad,
-                int min_vox, int polarize_roi,
-                const float *statmask) {
+                int min_vox, const float *statmask) {
     EXTREMUM *ppos, *pneg, *pall;        /**< local maxima, minima, all extrema */
     int npos = 0, nneg = 0, nall;        /**< number of maxima, minima, extrema */
     int mpos = MSIZE, mneg = MSIZE; /**< array allocation sizes */
-    int i, iz, iy, ix, nx = dim[0], nxy = dim[0]*dim[1];
+    int i, iz, iy, ix;
+    const int nx = dim[0], nxy = dim[0]*dim[1];
     const float d2thresh = dthresh * dthresh;
-    
+
+    logmsg(LOG_PEAK_TRACE, "starting find_peaks");
+
     ppos = malloc(mpos * sizeof(EXTREMUM));
     if (!ppos) {
         error_handler(ERROR_ALLOCATION, "positive extremum array");
@@ -650,20 +646,20 @@ void find_peaks(float *image, const int dim[3],
            "peak value     thresholds %10.4f to %10.4f\n", vtneg, vtpos);
     logmsg(LOG_PEAK_PARAMS,
            "peak curvature thresholds %10.4f to %10.4f\n", ctneg, ctpos);
-    logmsg(LOG_PEAK_TRACE, "compiling extrema slice");
+    logmsg(LOG_PEAK_TRACE, "compiling extrema slices");
 
-    for (iz = 0; iz < dim[2] - 1; iz++) {
+    for (iz = 1; iz < dim[2] - 1; iz++) {
         for (iy = 1; iy < dim[1] - 1; iy++) {
             for (ix = 1; ix < dim[0] - 1; ix++) {
                 int k;
                 float del2v = 0.0, dvdx[3], d2vdx2[3], w[3], fndex[3], x[3];
 
-                i = ix + dim[1] * (iy + dim[2] * iz);
-        
+                i = ix + dim[2]*(iy + dim[1]*iz);
+
                 dvdx[0] = (-image[i - 1] + image[i + 1]) / 2.0;
                 dvdx[1] = (-image[i - nx] + image[i + nx]) / 2.0;
                 dvdx[2] = (-image[i - nxy] + image[i + nxy]) / 2.0;
-
+                
                 d2vdx2[0] = -2.0 * image[i] + image[i - 1] + image[i + 1];
                 d2vdx2[1] = -2.0 * image[i] + image[i - nx] + image[i + nx];
                 d2vdx2[2] = -2.0 * image[i] + image[i - nxy] + image[i + nxy];
@@ -704,10 +700,12 @@ void find_peaks(float *image, const int dim[3],
 
     nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
 
+    logmsg(LOG_PEAK_TRACE, "after consolidation nall = %d\n", nall);
+
     /* build a mask of spheres centered on the distinct extrema */
     if (orad > 0) {
         cull_small_extrema(image, statmask, dim, mmppixr, centerr,
-                           &pall, &nall, orad, min_vox, polarize_roi);
+                           &pall, &nall, orad, min_vox);
         build_mask(image, statmask, roi, dim, mmppixr, centerr,
                    pall, nall, orad);
     }
