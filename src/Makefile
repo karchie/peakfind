@@ -1,3 +1,4 @@
+CC=gcc
 FC=gcc
 FFLAGS=-fPIC -g --fixed-line-length-132 -fcray-pointer
 CFLAGS=-fPIC -g
