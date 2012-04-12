@@ -20,8 +20,9 @@
  * @param radius blurring sphere radius in mm
  
  */
-extern void hsphere3d_(float *image, int *nx, int *ny, int *nz,
-		       float *mmppix, float *radius);
+extern void hsphere3d_(float *image,
+                       const int *nx, const int *ny, const int *nz,
+		       const float *mmppix, const float *radius);
 
 /**
  * Return into v the interpolated value of imgt at location x.
@@ -37,7 +38,8 @@ extern void hsphere3d_(float *image, int *nx, int *ny, int *nz,
  * @param v value at x
  * @param lslice slice from which most of the data are taken
  */
-extern void imgvalx_(float *imgt, int *nx, int *ny, int *nz,
-		     float *center, float *mmppix,
-		     float *x, float *v, int *lslice);
+extern void imgvalx_(const float *imgt,
+                     const int *nx, const int *ny, const int *nz,
+		     const float *center, const float *mmppix,
+		     const float *x, float *v, int *lslice);
 #endif

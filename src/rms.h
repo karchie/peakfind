@@ -13,7 +13,7 @@
  * @param margin margin size
  * @return size of padded vector
  */
-extern int npad_(int *size, int *margin);
+extern int npad_(const int *size, const int *margin);
 
 /**
  * Center the 3D source data in a padded volume.
@@ -26,8 +26,10 @@ extern int npad_(int *size, int *margin);
  * @param dd1 dimension 2 of imagp
  * @param dd2 dimension 3 of imagp
  */
-extern void imgpad_(float *imag, int *nx, int *ny, int *nz,
-		    float *imagp, int *dd0, int *dd1, int *dd2);
+extern void imgpad_(const float *imag,
+                    const int *nx, const int *ny, const int *nz,
+		    float *imagp,
+                    const int *dd0, const int *dd1, const int *dd2);
 
 /**
  * Extract 3D data from a padded source volume, undoing imgpad_.
@@ -40,7 +42,9 @@ extern void imgpad_(float *imag, int *nx, int *ny, int *nz,
  * @param dd1 dimension 2 of imagp
  * @param dd2 dimension 3 of imagp
  */
-extern void imgdap_(float *imag, int *nx, int *ny, int *nz,
-		   float *imagp, int *dd0, int *dd1, int *dd2);
+extern void imgdap_(float *imag,
+                    const int *nx, const int *ny, const int *nz,
+                    const float *imagp,
+                    const int *dd0, const int *dd1, const int *dd2);
 
 #endif

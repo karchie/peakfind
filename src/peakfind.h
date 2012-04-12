@@ -12,17 +12,6 @@
 
 #include <stdio.h>
 
-extern void peakf_to_to(FILE *fp);
-extern void peakf_log_to_stderr();
-extern void peakf_log_to_stdout();
-extern void peakf_set_log_image_padding(int should);
-extern void peakf_set_log_peak_params(int should);
-extern void peakf_set_log_peak_trace(int should);
-extern void peakf_set_log_peak_results(int should);
-extern void peakf_set_log_undef_point(int should);
-extern void peakf_set_log(int should);
-
-extern void peakf_set_error_handler(void (*)(int, const char*));
 
 extern void sphereblur(float *image, const int dim[3],
                        const float mmppixr[3], float radius);

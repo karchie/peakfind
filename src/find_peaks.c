@@ -15,7 +15,7 @@
 #include <stdarg.h>
 
 #include "peakfind.h"
-#include "rms.h"
+#include "pf_util.h"
 #include "4dfpf.h"
 
 typedef struct
@@ -30,133 +30,8 @@ typedef struct
 
 static const unsigned int MSIZE = 2048;
 
-/**
- * logging options
- */
-static const unsigned int LOG_IMAGE_PADDING = 0x01;
-static const unsigned int LOG_PEAK_PARAMS = 0x02;
-static const unsigned int LOG_PEAK_TRACE = 0x04;
-static const unsigned int LOG_PEAK_RESULTS = 0x08;
-static const unsigned int LOG_UNDEF_POINT = 0x10;
-
 static const unsigned int NTOP = 1000;
 
-/*
- * error types
- */
-#define ERROR_FATAL 0x0001
-static const int ERROR_ALLOCATION = 0x0002 | ERROR_FATAL;
-
-static char *error_messages[] = {
-    0, 0, 0,
-    "FATAL: memory allocation error",
-};
-
-/**
- * logging flags
- */
-static int verbosity = ~0;
-static FILE *logfp = 0;
-
-static void logmsg(int option, char *message, ...) {
-    va_list ap;
-  
-    va_start(ap, message);
-    if (!logfp) {
-      logfp = stdout;
-    }
-    vfprintf(logfp, message, ap);
-    va_end(ap);
-    fflush(stdout);
-}
-
-void peakf_log_to(FILE *fp) {
-  logfp = fp;
-}
-
-void peakf_log_to_stderr() {
-  logfp = stderr;
-}
-
-void peakf_log_to_stdout() {
-  logfp = stdout;
-}
-
-/**
- * Set whether image padding operations should be logged.
- *
- * @param should nonzero if image padding should be logged,
- *        zero if it should not
- */
-void peakf_set_log_image_padding(int should) {
-    if (should) {
-        verbosity |= LOG_IMAGE_PADDING;
-    } else {
-        verbosity &= ~LOG_IMAGE_PADDING;
-    }
-}
-
-void peakf_set_log_peak_params(int should) {
-    if (should) {
-        verbosity |= LOG_PEAK_PARAMS;
-    } else {
-        verbosity &= ~LOG_PEAK_PARAMS;
-    }
-}
-
-void peakf_set_log_peak_trace(int should) {
-    if (should) {
-        verbosity |= LOG_PEAK_TRACE;
-    } else {
-        verbosity &= ~LOG_PEAK_TRACE;
-    }
-}
-
-void peakf_set_log_peak_results(int should) {
-    if (should) {
-        verbosity |= LOG_PEAK_RESULTS;
-    } else {
-        verbosity &= ~LOG_PEAK_RESULTS;
-    }
-}
-
-void peakf_set_log_undef_point(int should) {
-    if (should) {
-        verbosity |= LOG_UNDEF_POINT;
-    } else {
-        verbosity &= ~LOG_UNDEF_POINT;
-    }
-}
-
-void peakf_set_log(int should) {
-    verbosity = should ? ~0 : 0;
-}
-
-
-/*
- * Error handling
- */
-
-static void default_error(int type, const char *message) {
-    fputs(error_messages[type], stderr);
-    if (message) {
-        fprintf(stderr, ": %s", message);
-    }
-    fputs("\n", stderr);
-    if (type & ERROR_FATAL) {
-        exit(type);
-    }
-}
-
-static void (*error_handler)(int, const char *) = default_error;
-
-void peakf_set_error_handler(void (*f)(int, const char *)) {
-    error_handler = f;
-}
-
-/*
- * utilities
- */
 
 static int logpeaklist(const EXTREMUM *plst, int nlst,
                        const float mmppixr[3], const float centerr[3],
@@ -164,27 +39,27 @@ static int logpeaklist(const EXTREMUM *plst, int nlst,
     int i, k, ntot = 0;
     float fndex[3];
   
-    logmsg(LOG_PEAK_RESULTS, "%-5s%10s%10s%10s%10s%10s%10s%10s%10s%",
+    pf_log(PF_LOG_PEAK_RESULTS, "%-5s%10s%10s%10s%10s%10s%10s%10s%10s%",
            "ROI", "index_x", "index_y", "index_z",
            "atlas_x", "atlas_y", "atlas_z", "value", "curvature");
     if (nvox_flag) {
-        logmsg(LOG_PEAK_RESULTS, "%10s", "nvox");
+        pf_log(PF_LOG_PEAK_RESULTS, "%10s", "nvox");
     }
-    logmsg(LOG_PEAK_RESULTS,"\n");
+    pf_log(PF_LOG_PEAK_RESULTS,"\n");
     for (i = 0; i < ntop && i < nlst; i++) {
         if (plst[i].killed) continue;
         for (k = 0; k < 3; k++) {
             fndex[k] = (plst[i].x[k] + centerr[k]) / mmppixr[k];
         }
-        logmsg(LOG_PEAK_RESULTS,
+        pf_log(PF_LOG_PEAK_RESULTS,
                "%-5d%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.6f",
                ntot++ + 1, fndex[0], fndex[1], fndex[2],
                plst[i].x[0], plst[i].x[1], plst[i].x[2], plst[i].v,
                -plst[i].del2v);
         if (nvox_flag) {
-            logmsg(LOG_PEAK_RESULTS, "%10d", plst[i].nvox);
+            pf_log(PF_LOG_PEAK_RESULTS, "%10d", plst[i].nvox);
         }
-        logmsg(LOG_PEAK_RESULTS, "\n");
+        pf_log(PF_LOG_PEAK_RESULTS, "\n");
     }
     return ntot;
 }
@@ -257,7 +132,7 @@ static int combine_extrema(EXTREMUM **ppall,
 
         *ppall = malloc(nall * sizeof(EXTREMUM));
         if (!*ppall) {
-            error_handler(ERROR_ALLOCATION, "peak combination");
+            pf_error(PF_ERR_ALLOCATION, "peak combination");
         }
 
         for (i = 0; i < npos; i++) {
@@ -302,7 +177,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
 
         /* Look for the closest within-threshold pair, if any */
         npair = 0;
-        logmsg(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm: ",
+        pf_log(PF_LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm: ",
                sqrt(d2thresh));
         for (i = 0; i < nlst; i++) {
             if (plst[i].killed) continue;
@@ -311,7 +186,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
                 if (plst[j].killed) continue;
                 d2 = pdist2(plst + i, plst + j);
                 if (d2 < d2thresh) {
-                    logmsg(LOG_PEAK_RESULTS,
+                    pf_log(PF_LOG_PEAK_RESULTS,
                            "\n%5d%5d%10.4f", i + 1, j + 1, d2);
                     if (d2 < d2min) {
                         imin = i;
@@ -326,7 +201,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
         /* If any peak pairs were within threshold, consolidate the
          * closest pair.
          */
-        logmsg(LOG_PEAK_RESULTS, "%snpair = %d\n",
+        pf_log(PF_LOG_PEAK_RESULTS, "%snpair = %d\n",
 	       npair ? "\n" : "", npair);
         if (npair > 0) {
             int k;
@@ -489,7 +364,7 @@ static int cull_small_extrema(const float *img, const float *mask,
         int j;
         EXTREMUM *pnew = malloc((*nallp - nkilled) * sizeof(EXTREMUM));
         if (!pnew) {
-            error_handler(ERROR_ALLOCATION, "surviving peaks");
+            pf_error(PF_ERR_ALLOCATION, "surviving peaks");
         }
         for (i = j = 0; i < *nallp; i++) {
             if (!(*pallp)[i].killed) {
@@ -507,41 +382,6 @@ static int cull_small_extrema(const float *img, const float *mask,
 /*
  * Exported functions
  */
-
-/**
- * Convolves the provided image in place with a sphere of the provided
- * radius. Uses Avi's FORTRAN routine hsphere3d.
- *
- * @param image 3D image array
- * @param dimensions (x,y,z) of image
- * @param mmppixr mm/pixel for each dimension
- * @param radius radius of blurring sphere, in mm
- */
-void sphereblur(float* image, const int dim[3],
-                const float mmppixr[3], float radius) {
-    int i;
-    int pdim[3], psize = 1;
-    int *vdim = (int*)dim;      /* really we don't change this */
-    float *mmpvox = (float*)mmppixr;
-
-    for (i = 0; i < 3; i++) {
-        int margin = 2.0 * radius / mmppixr[i];
-        pdim[i] = npad_((int*)dim + i, &margin);
-        psize *= pdim[i];
-    }
-    logmsg(LOG_IMAGE_PADDING,
-           "image dimensions %d %d %d padded to %d %d %d\n",
-           vdim[0], vdim[1], vdim[2], pdim[0], pdim[1], pdim[2]);
-  
-    float *padimage = calloc(psize, sizeof(float));
-    if (!padimage) {
-        error_handler(ERROR_ALLOCATION, "blur padding");
-    }
-  
-    imgpad_(image, vdim, vdim+1, vdim+2, padimage, pdim, pdim+1, pdim+2);
-    hsphere3d_(padimage, pdim, pdim+1, pdim+2, mmpvox, &radius);
-    imgdap_(image, vdim, vdim+1, vdim+2, padimage, pdim, pdim+1, pdim+2);
-}
 
 
 
@@ -591,7 +431,7 @@ void sphereblur(float* image, const int dim[3],
         imgvalx_(img, (int*)d, (int*)d+1, (int*)d+2,                    \
                  (float*)centerr, (float*)mmppixr, x, &vx, &slice);     \
         if (slice < 1) {                                                \
-            logmsg(LOG_UNDEF_POINT,                                     \
+            pf_log(PF_LOG_UNDEF_POINT,                                     \
                    "undefined imgvalx point %d %d %d", ix, iy, iz);     \
             continue;                                                   \
         }                                                               \
@@ -600,7 +440,7 @@ void sphereblur(float* image, const int dim[3],
             m ## dir += MSIZE;                                          \
             p ## dir = realloc(p ## dir, m ## dir * sizeof(EXTREMUM));  \
             if (!p ## dir)                                              \
-                error_handler(ERROR_ALLOCATION, "extrema array update"); \
+                pf_error(PF_ERR_ALLOCATION, "extrema array update"); \
         }                                                               \
         for (k = 0; k < 3; k++) p ## dir[n ## dir].x[k] = x[k];         \
         p ## dir[n ## dir].v = vx;                                      \
@@ -648,22 +488,22 @@ void find_peaks(float *image, const int dim[3],
     const int nx = dim[0], nxy = dim[0]*dim[1];
     const float d2thresh = dthresh * dthresh;
 
-    logmsg(LOG_PEAK_TRACE, "starting find_peaks...\n");
+    pf_log(PF_LOG_PEAK_TRACE, "starting find_peaks...\n");
 
     ppos = malloc(mpos * sizeof(EXTREMUM));
     if (!ppos) {
-        error_handler(ERROR_ALLOCATION, "positive extremum array");
+        pf_error(PF_ERR_ALLOCATION, "positive extremum array");
     }
     pneg = malloc(mpos * sizeof(EXTREMUM));
     if (!pneg) {
-        error_handler(ERROR_ALLOCATION, "negative extremum array");
+        pf_error(PF_ERR_ALLOCATION, "negative extremum array");
     }
 
-    logmsg(LOG_PEAK_PARAMS,
+    pf_log(PF_LOG_PEAK_PARAMS,
            "peak value     thresholds %10.4f to %10.4f\n", vtneg, vtpos);
-    logmsg(LOG_PEAK_PARAMS,
+    pf_log(PF_LOG_PEAK_PARAMS,
            "peak curvature thresholds %10.4f to %10.4f\n", ctneg, ctpos);
-    logmsg(LOG_PEAK_TRACE, "compiling extrema slices");
+    pf_log(PF_LOG_PEAK_TRACE, "compiling extrema slices");
 
     for (iz = 1; iz < dim[2] - 1; iz++) {
         for (iy = 1; iy < dim[1] - 1; iy++) {
@@ -702,7 +542,7 @@ void find_peaks(float *image, const int dim[3],
         }
     }
 
-    logmsg(LOG_PEAK_TRACE, "\nbefore sorting npos = %d nneg = %d\n",
+    pf_log(PF_LOG_PEAK_TRACE, "\nbefore sorting npos = %d nneg = %d\n",
            npos, nneg);
 
     /* Sort by value, then consolidate nearby extrema */
@@ -717,7 +557,7 @@ void find_peaks(float *image, const int dim[3],
 
     nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
 
-    logmsg(LOG_PEAK_TRACE, "after consolidation nall = %d\n", nall);
+    pf_log(PF_LOG_PEAK_TRACE, "after consolidation nall = %d\n", nall);
 
     /* build a mask of spheres centered on the distinct extrema */
     if (orad > 0) {

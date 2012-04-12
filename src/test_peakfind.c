@@ -56,7 +56,7 @@ int main(int argc, const char *argv[]) {
   int iz, iy, ix, i;
   float *image, *mask, *roi;
 
-  peakf_set_log(1);
+  pf_log_all(1);
 
   image = calloc(dim, sizeof(float));
   roi = calloc(dim, sizeof(float));
