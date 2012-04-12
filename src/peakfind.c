@@ -56,14 +56,30 @@ static char *error_messages[] = {
  * logging flags
  */
 static int verbosity = ~0;
+static FILE *logfp = 0;
 
 static void logmsg(int option, char *message, ...) {
     va_list ap;
   
     va_start(ap, message);
-    vfprintf(stdout, message, ap);
+    if (!logfp) {
+      logfp = stdout;
+    }
+    vfprintf(logfp, message, ap);
     va_end(ap);
     fflush(stdout);
+}
+
+void peakf_log_to(FILE *fp) {
+  logfp = fp;
+}
+
+void peakf_log_to_stderr() {
+  logfp = stderr;
+}
+
+void peakf_log_to_stdout() {
+  logfp = stdout;
 }
 
 /**
@@ -286,7 +302,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
 
         /* Look for the closest within-threshold pair, if any */
         npair = 0;
-        logmsg(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm:\n",
+        logmsg(LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm: ",
                sqrt(d2thresh));
         for (i = 0; i < nlst; i++) {
             if (plst[i].killed) continue;
@@ -296,7 +312,7 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
                 d2 = pdist2(plst + i, plst + j);
                 if (d2 < d2thresh) {
                     logmsg(LOG_PEAK_RESULTS,
-                           "%5d%5d%10.4f\n", i + 1, j + 1, d2);
+                           "\n%5d%5d%10.4f", i + 1, j + 1, d2);
                     if (d2 < d2min) {
                         imin = i;
                         jmin = j;
@@ -310,7 +326,8 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
         /* If any peak pairs were within threshold, consolidate the
          * closest pair.
          */
-        logmsg(LOG_PEAK_RESULTS, "npair = %d\n", npair);
+        logmsg(LOG_PEAK_RESULTS, "%snpair = %d\n",
+	       npair ? "\n" : "", npair);
         if (npair > 0) {
             int k;
             float x[3];
@@ -631,7 +648,7 @@ void find_peaks(float *image, const int dim[3],
     const int nx = dim[0], nxy = dim[0]*dim[1];
     const float d2thresh = dthresh * dthresh;
 
-    logmsg(LOG_PEAK_TRACE, "starting find_peaks");
+    logmsg(LOG_PEAK_TRACE, "starting find_peaks...\n");
 
     ppos = malloc(mpos * sizeof(EXTREMUM));
     if (!ppos) {
@@ -695,8 +712,8 @@ void find_peaks(float *image, const int dim[3],
     consolidate(pneg, nneg, d2thresh);
 
     /* print the list of peaks */
-    logpeaklist(ppos, npos, mmppixr, centerr, NTOP, 1);
-    logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 1);
+    logpeaklist(ppos, npos, mmppixr, centerr, NTOP, 0);
+    logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 0);
 
     nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
 

@@ -10,6 +10,11 @@
 #ifndef _PEAKFIND_H_
 #define _PEAKFIND_H_
 
+#include <stdio.h>
+
+extern void peakf_to_to(FILE *fp);
+extern void peakf_log_to_stderr();
+extern void peakf_log_to_stdout();
 extern void peakf_set_log_image_padding(int should);
 extern void peakf_set_log_peak_params(int should);
 extern void peakf_set_log_peak_trace(int should);
