@@ -18,21 +18,12 @@
 #include "pf_util.h"
 #include "4dfpf.h"
 
-typedef struct
-{
-    float        x[3];          /**< location of peak */
-    float        v;             /**< value at peak */
-    float        del2v;         /**< Laplacian at peak */
-    float        weight;
-    int        nvox;
-    int        killed;
-} EXTREMUM;
 
 static const unsigned int MSIZE = 2048;
 
 static const unsigned int NTOP = 1000;
 
-
+#if 0
 static int logpeaklist(const EXTREMUM *plst, int nlst,
                        const float mmppixr[3], const float centerr[3],
                        int ntop, int nvox_flag) {
@@ -63,6 +54,7 @@ static int logpeaklist(const EXTREMUM *plst, int nlst,
     }
     return ntot;
 }
+#endif
 
 
 /**
@@ -473,20 +465,23 @@ static int cull_small_extrema(const float *img, const float *mask,
  * @param orad radius for peak spheres in roi
  * @param min_vox minimum voxel count for peak ROIs
  * @param statmask statistical significance mask
+ * @param peaks peaks_t for returning peaks information
  */
-void find_peaks(float *image, const int dim[3],
-                const float mmppixr[3], const float centerr[3],
-                float vtneg, float vtpos,
-                float ctneg, float ctpos,
-                float dthresh,
-                float *roi, float orad,
-                int min_vox, const float *statmask) {
+void
+find_peaks(float *image, const int dim[3],
+           const float mmppixr[3], const float centerr[3],
+           float vtneg, float vtpos, float ctneg, float ctpos,
+           float dthresh,
+           float *roi, float orad,
+           int min_vox, const float *statmask,
+           struct peaks_t *peaksp) {
     EXTREMUM *ppos, *pneg, *pall;        /**< local maxima, minima, all extrema */
     int npos = 0, nneg = 0, nall;        /**< number of maxima, minima, extrema */
     int mpos = MSIZE, mneg = MSIZE; /**< array allocation sizes */
     int i, iz, iy, ix;
     const int nx = dim[0], nxy = dim[0]*dim[1];
     const float d2thresh = dthresh * dthresh;
+    struct peaks_t rval;
 
     pf_log(PF_LOG_PEAK_TRACE, "starting find_peaks...\n");
 
@@ -551,9 +546,11 @@ void find_peaks(float *image, const int dim[3],
     qsort(pneg, nneg, sizeof(EXTREMUM), pcompare);
     consolidate(pneg, nneg, d2thresh);
 
+#if 0
     /* print the list of peaks */
     logpeaklist(ppos, npos, mmppixr, centerr, NTOP, 0);
     logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 0);
+#endif
 
     nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
 
@@ -569,7 +566,11 @@ void find_peaks(float *image, const int dim[3],
 
     free(ppos);
     free(pneg);
-    if (nall > 0) {
-        free(pall);
+
+    if (peaksp) {
+      peaksp->n = nall;
+      peaksp->p = pall;
+    } else {
+      free(pall);
     }
 }

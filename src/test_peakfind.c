@@ -94,7 +94,7 @@ int main(int argc, const char *argv[]) {
 
   find_peaks(image, dims, mmppixr, centerr,
              0, 0, 0, 0, 1,
-             roi, 4, 8, mask);
+             roi, 4, 8, mask, 0);
 
   puts("slice at peak:\n");
   display(roi, dims, 17, max);
