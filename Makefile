@@ -1,6 +1,7 @@
-all: lib
+all: 
+	$(MAKE) -C src $@
 
-lib:
+clean:
 	$(MAKE) -C src $@
 
 tags:

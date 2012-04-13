@@ -474,14 +474,13 @@ find_peaks(float *image, const int dim[3],
            float dthresh,
            float *roi, float orad,
            int min_vox, const float *statmask,
-           struct peaks_t *peaksp) {
+	   int *npeaksp, EXTREMUM **peaksp) {
     EXTREMUM *ppos, *pneg, *pall;        /**< local maxima, minima, all extrema */
     int npos = 0, nneg = 0, nall;        /**< number of maxima, minima, extrema */
     int mpos = MSIZE, mneg = MSIZE; /**< array allocation sizes */
     int i, iz, iy, ix;
     const int nx = dim[0], nxy = dim[0]*dim[1];
     const float d2thresh = dthresh * dthresh;
-    struct peaks_t rval;
 
     pf_log(PF_LOG_PEAK_TRACE, "starting find_peaks...\n");
 
@@ -567,9 +566,9 @@ find_peaks(float *image, const int dim[3],
     free(ppos);
     free(pneg);
 
-    if (peaksp) {
-      peaksp->n = nall;
-      peaksp->p = pall;
+    if (npeaksp && peaksp) {
+      *npeaksp = nall;
+      *peaksp = pall;
     } else {
       free(pall);
     }

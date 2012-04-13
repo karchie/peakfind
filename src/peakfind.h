@@ -22,10 +22,6 @@ typedef struct {
     int        killed;
 } EXTREMUM;
 
-struct peaks_t {
-    int n;
-    EXTREMUM *p;
-};
 
 extern void sphereblur(float *image, const int dim[3],
                        const float mmppixr[3], float radius);
@@ -37,5 +33,5 @@ find_peaks(float *image, const int dim[3],
            float dthresh,
            float *roi, float orad,
            int min_vox, const float *statmask,
-           struct peaks_t *peaks);
+	   int *npeaks, EXTREMUM **peaks);
 #endif

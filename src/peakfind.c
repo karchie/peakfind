@@ -7,7 +7,6 @@
  */
 
 #include <math.h>
-#include <stdio.h>              /* ### */
 #include <stdlib.h>
 
 #include "matrix.h"
@@ -60,9 +59,9 @@ void mexFunction(int nlhs, mxArray *plhs[],
     int i;
     const int *dims, *maskdims;
     float vtneg = 0, vtpos = 0, ctneg = 0, ctpos = 0, dthresh = 0;
-    int minvox = 1;
+    int minvox = 1, npeaks;
     float mmppixr[DIMS], centerr[DIMS];
-    struct peaks_t peaks;
+    EXTREMUM *peaks;
     
     /* REQUIRED: image, mmppixr, centerr, orad, mask
      * OPTIONAL: vtpos, vtneg, ctpos, ctneg, dthresh
@@ -137,12 +136,12 @@ void mexFunction(int nlhs, mxArray *plhs[],
                (float*)mxGetData(MMPVOX), (float*)mxGetData(CENTER),
                vtneg, vtpos, ctneg, ctpos, dthresh,
                (float*)mxGetData(ROI), *(float*)mxGetData(ORAD),
-               minvox, (float*)mxGetData(MASK), &peaks);
+               minvox, (float*)mxGetData(MASK), &npeaks, &peaks);
 
-    PEAKS = mxCreateStructMatrix(1, peaks.n, n_peak_fields, peak_fields);
-    for (i = 0; i < peaks.n; i++) {
+    PEAKS = mxCreateStructMatrix(1, npeaks, n_peak_fields, peak_fields);
+    for (i = 0; i < npeaks; i++) {
         int j;
-        EXTREMUM p = peaks.p[i];
+        EXTREMUM p = peaks[i];
 
         mxArray *x = mxCreateNumericMatrix(1, DIMS, mxSINGLE_CLASS, 0);
         float *xvals = (float *)mxGetData(x);
@@ -167,5 +166,5 @@ void mexFunction(int nlhs, mxArray *plhs[],
         *(int*)mxGetData(nvox) = p.nvox;
         mxSetField(PEAKS, i, peak_fields[4], nvox);
     }
-    free(peaks.p);
+    free(peaks);
 }
