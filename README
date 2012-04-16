@@ -6,8 +6,52 @@ Snyder and peak_nii by Tony Wilson.
 Copyright (c) 2012 Washington University
 Author: Kevin A. Archie <karchie@wustl.edu>
 
-Uses Fortran subroutines from the 4dfp suite:
+All Fortran subroutines in the package were written by Avi Snyder.
 
-gauss_4dfp: hsphere3d
-imgreg_4dfp: imgvalx
-librms: fftsol, imgpad, polfit
+This package produces two MATLAB functions (as mex files):
+
+------------------------------------------------------------
+
+[peaks, roi] = peakfind(image, mmppixr, centerr, orad, mask, ...)
+
+Produces a list of peaks and an ROI mask image.
+
+image : single-precision 3D image data in which peaks will be identified
+mmppixr : single-precision 3-vector of voxel dimensions in mm
+centerr : single-precision 3-vector atlas space offset of image
+orad : radius of peak ROIs, in mm
+mask : mask applied before producing ROI
+
+optional arguments can be specified like this:
+
+[p, r] = peakfind(i, m, c, o, mask, 'vtpos', 0.5, 'vtneg', 0.1);
+
+valid optional arguments are:
+
+vtpos : positive threshold peak value (default 0)
+vtneg : negative threshold peak value (default 0)
+ntop : maximum number of output peaks (default 1000)
+minvox : minimum output ROI voxel count (default 1)
+ctpos : peak curvature threshold for positive peaks (default 0)
+ctneg : peak curvature threshold for negative peaks (default 0)
+
+return values are:
+
+peaks: array of peak structures; each peak structure contains fields:
+  i : floating point index (i,j,k) of peak center (rederived from x)
+  x : floating point location (x,y,z) of peak center in atlas space
+  v : value at peak center
+  del2v : Laplacian at peak center
+  weight : number of peaks consolidated into this peak
+  voxels : size of this peak's ROI sphere, in voxels
+
+------------------------------------------------------------
+
+blurimg = sphereblur(image, mmppixr, radius)
+
+Blurs the provided image by convolving with a spherical kernel of
+specified radius.
+
+image : single-precision 3D image to be blurred
+mmppixr : single-precision 3-vector of voxel dimensions in mm
+radius : sphere radius, in mm
