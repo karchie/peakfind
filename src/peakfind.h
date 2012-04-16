@@ -32,6 +32,6 @@ find_peaks(float *image, const int dim[3],
            float vtneg, float vtpos, float ctneg, float ctpos,
            float dthresh,
            float *roi, float orad,
-           int min_vox, const float *statmask,
+           int max_peaks, int min_vox, const float *statmask,
 	   int *npeaks, EXTREMUM **peaks);
 #endif

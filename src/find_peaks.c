@@ -240,8 +240,11 @@ static void build_mask(const float *img, const float *mask,
     int ix, iy, iz, i;
 
     if (0 == nall) {
-        fputs("no peaks, skipping ROI mask construction\n", stdout);
+        pf_log(PF_LOG_PEAK_RESULTS,
+               "no peaks, skipping ROI mask build\n");
         return;
+    } else {
+        pf_log(PF_LOG_PEAK_TRACE, "starting ROI mask build\n");
     }
 
     i = 0;
@@ -268,7 +271,7 @@ static void build_mask(const float *img, const float *mask,
 
                 /* if the closest peak is within orad, mark this point. */
                 if (d2min < orad2 && UNMASKED(mask, i)) {
-                    roi[i] = img[i];
+                    roi[i] = ipmin + 2;
                 } else {
                     roi[i] = 0.0;
                 }
@@ -289,6 +292,7 @@ static void build_mask(const float *img, const float *mask,
  * @param nallp pointer to int size of pallp
  * @param mmppixr voxel dimensions in mm
  * @param centerr center coordinate location in mm
+ * @param max_peaks largest number of peaks allowed
  * @param orad radius of ROI spheres
  * @param min_vox minimum voxel count for retained ROIs
  * @return number of culled peaks
@@ -298,6 +302,7 @@ static int cull_small_extrema(const float *img, const float *mask,
                               const float mmppixr[3],
                               const float centerr[3],
                               EXTREMUM **pallp, int *nallp,
+                              int max_peaks,
                               int orad, int min_vox) {
     const int orad2 = orad * orad;
     int iz, iy, ix, i, nkilled = 0;
@@ -307,8 +312,11 @@ static int cull_small_extrema(const float *img, const float *mask,
         return 0;
     }
     if (0 == *nallp){
-        fputs("no peaks found, skipping small peak cull\n", stderr);
+        pf_log(PF_LOG_PEAK_RESULTS,
+               "no peaks found, skipping small peak cull\n");
         return 0;
+    } else {
+        pf_log(PF_LOG_PEAK_TRACE, "starting small extrema removal\n");
     }
 
     /* count voxels in each ROI */
@@ -339,12 +347,17 @@ static int cull_small_extrema(const float *img, const float *mask,
         }
     }
 
-    /* find peaks that are too small */
-    for (i = 0; i < *nallp; i++) {
+    /* cull peaks that are too small by voxel count */
+    for (i = 0; i < *nallp && i < max_peaks; i++) {
         if ((*pallp)[i].nvox < min_vox) {
             (*pallp)[i].killed = 1;
             nkilled++;
         }
+    }
+    /* also cull peaks that are past the peak count cutoff */
+    for (; i < *nallp; i++) {
+        (*pallp)[i].killed = 1;
+        nkilled++;
     }
 
     /* if any peaks were killed, make a new, compacted peaks list */
@@ -473,7 +486,7 @@ find_peaks(float *image, const int dim[3],
            float vtneg, float vtpos, float ctneg, float ctpos,
            float dthresh,
            float *roi, float orad,
-           int min_vox, const float *statmask,
+           int max_peaks, int min_vox, const float *statmask,
 	   int *npeaksp, EXTREMUM **peaksp) {
     EXTREMUM *ppos, *pneg, *pall;        /**< local maxima, minima, all extrema */
     int npos = 0, nneg = 0, nall;        /**< number of maxima, minima, extrema */
@@ -482,7 +495,14 @@ find_peaks(float *image, const int dim[3],
     const int nx = dim[0], nxy = dim[0]*dim[1];
     const float d2thresh = dthresh * dthresh;
 
-    pf_log(PF_LOG_PEAK_TRACE, "starting find_peaks...\n");
+    if (max_peaks <= 0) {
+        max_peaks = NTOP;
+    }
+
+    pf_log_to_stderr();
+    pf_log(PF_LOG_PEAK_TRACE,
+           "starting find_peaks with orad=%g...\n",
+           orad);
 
     ppos = malloc(mpos * sizeof(EXTREMUM));
     if (!ppos) {
@@ -494,9 +514,9 @@ find_peaks(float *image, const int dim[3],
     }
 
     pf_log(PF_LOG_PEAK_PARAMS,
-           "peak value     thresholds %10.4f to %10.4f\n", vtneg, vtpos);
+           "peak value     thresholds %10.4f,%10.4f\n", vtneg, vtpos);
     pf_log(PF_LOG_PEAK_PARAMS,
-           "peak curvature thresholds %10.4f to %10.4f\n", ctneg, ctpos);
+           "peak curvature thresholds %10.4f,%10.4f\n", ctneg, ctpos);
     pf_log(PF_LOG_PEAK_TRACE, "compiling extrema slices");
 
     for (iz = 1; iz < dim[2] - 1; iz++) {
@@ -547,8 +567,8 @@ find_peaks(float *image, const int dim[3],
 
 #if 0
     /* print the list of peaks */
-    logpeaklist(ppos, npos, mmppixr, centerr, NTOP, 0);
-    logpeaklist(pneg, nneg, mmppixr, centerr, NTOP, 0);
+    logpeaklist(ppos, npos, mmppixr, centerr, max_peaks, 0);
+    logpeaklist(pneg, nneg, mmppixr, centerr, max_peaks, 0);
 #endif
 
     nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
@@ -558,7 +578,7 @@ find_peaks(float *image, const int dim[3],
     /* build a mask of spheres centered on the distinct extrema */
     if (orad > 0) {
         cull_small_extrema(image, statmask, dim, mmppixr, centerr,
-                           &pall, &nall, orad, min_vox);
+                           &pall, &nall, max_peaks, orad, min_vox);
         build_mask(image, statmask, roi, dim, mmppixr, centerr,
                    pall, nall, orad);
     }

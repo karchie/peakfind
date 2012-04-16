@@ -26,7 +26,7 @@
 #define ROI    plhs[1]
 
 static const char *peak_fields[] = {
-    "x", "v", "del2v", "weight", "voxels"
+    "i", "x", "v", "del2v", "weight", "voxels"
 };
 static const int n_peak_fields = sizeof(peak_fields)/sizeof(*peak_fields);
 
@@ -58,9 +58,10 @@ void mexFunction(int nlhs, mxArray *plhs[],
                  int nrhs, const mxArray *prhs[]) {
     int i;
     const int *dims, *maskdims;
-    float vtneg = 0, vtpos = 0, ctneg = 0, ctpos = 0, dthresh = 0;
-    int minvox = 1, npeaks;
-    float mmppixr[DIMS], centerr[DIMS];
+    float vtneg = 0, vtpos = 0, ctneg = 0, ctpos = 0, dthresh = 0, orad;
+    int minvox = 1, ntop = 0;
+    float *mmppixr, *centerr;
+    int npeaks;
     EXTREMUM *peaks;
     
     /* REQUIRED: image, mmppixr, centerr, orad, mask
@@ -84,6 +85,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
                 ctpos = getFloatVal(prhs[++i]);
             } else if (0 == strcmp("ctneg", keybuf)) {
                 dthresh = getIntVal(prhs[++i]);
+            } else if (0 == strcmp("ntop", keybuf)) {
+                ntop = getIntVal(prhs[++i]);
             } else {
                 mexErrMsgIdAndTxt("MATLAB:peakfind:invalidKey", keybuf);
             }
@@ -131,40 +134,57 @@ void mexFunction(int nlhs, mxArray *plhs[],
         }
     }
 
+    if (mxIsSingle(ORAD)) {
+        orad = *(float*)mxGetData(ORAD);
+    } else if (mxIsDouble(ORAD)) {
+        orad = (float)*(double*)mxGetData(ORAD);
+    } else {
+        mexErrMsgIdAndTxt("MATLAB:peakfind:invalidROIRadius",
+                          "ROI radius must be floating point type");
+    }
+
     ROI = mxCreateNumericArray(DIMS, dims, mxSINGLE_CLASS, mxREAL);
     find_peaks((float*)mxGetData(IMAGE), mxGetDimensions(IMAGE),
-               (float*)mxGetData(MMPVOX), (float*)mxGetData(CENTER),
+               mmppixr = (float*)mxGetData(MMPVOX),
+               centerr = (float*)mxGetData(CENTER),
                vtneg, vtpos, ctneg, ctpos, dthresh,
-               (float*)mxGetData(ROI), *(float*)mxGetData(ORAD),
-               minvox, (float*)mxGetData(MASK), &npeaks, &peaks);
+               (float*)mxGetData(ROI), orad, ntop, minvox, 
+               (float*)mxGetData(MASK), &npeaks, &peaks);
 
     PEAKS = mxCreateStructMatrix(1, npeaks, n_peak_fields, peak_fields);
     for (i = 0; i < npeaks; i++) {
         int j;
         EXTREMUM p = peaks[i];
 
+        mxArray *xi = mxCreateNumericMatrix(1, DIMS, mxSINGLE_CLASS, 0);
+        float *ivals = (float *)mxGetData(xi);
+        for (j = 0; j < DIMS; j++) {
+            ivals[j] = (p.x[j] + centerr[j])/mmppixr[j];
+        }
+        mxSetField(PEAKS, i, peak_fields[0], xi);
+
         mxArray *x = mxCreateNumericMatrix(1, DIMS, mxSINGLE_CLASS, 0);
         float *xvals = (float *)mxGetData(x);
         for (j = 0; j < DIMS; j++) {
             xvals[j] = p.x[j];
         }
-        mxSetField(PEAKS, i, peak_fields[0], x);
+        mxSetField(PEAKS, i, peak_fields[1], x);
 
         mxArray *v = mxCreateNumericMatrix(1, 1, mxSINGLE_CLASS, 0);
         *(float*)mxGetData(v) = p.v;
-        mxSetField(PEAKS, i, peak_fields[1], v);
+        mxSetField(PEAKS, i, peak_fields[2], v);
 
         mxArray *del2v = mxCreateNumericMatrix(1, 1, mxSINGLE_CLASS, 0);
         *(float*)mxGetData(del2v) = p.del2v;
-        mxSetField(PEAKS, i, peak_fields[2], del2v);
-        
+        mxSetField(PEAKS, i, peak_fields[3], del2v); 
+       
         mxArray *w = mxCreateNumericMatrix(1, 1, INT_CLASS, 0);
         *(int*)mxGetData(w) = p.weight;
-        mxSetField(PEAKS, i, peak_fields[3], w);
+        mxSetField(PEAKS, i, peak_fields[4], w);
 
         mxArray *nvox = mxCreateNumericMatrix(1, 1, INT_CLASS, 0);
         *(int*)mxGetData(nvox) = p.nvox;
-        mxSetField(PEAKS, i, peak_fields[4], nvox);
+        mxSetField(PEAKS, i, peak_fields[5], nvox);
     }
     free(peaks);
 }
