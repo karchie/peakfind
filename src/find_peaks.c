@@ -23,38 +23,7 @@ static const unsigned int MSIZE = 2048;
 
 static const unsigned int NTOP = 1000;
 
-#if 0
-static int logpeaklist(const EXTREMUM *plst, int nlst,
-                       const float mmppixr[3], const float centerr[3],
-                       int ntop, int nvox_flag) {
-    int i, k, ntot = 0;
-    float fndex[3];
-  
-    pf_log(PF_LOG_PEAK_RESULTS, "%-5s%10s%10s%10s%10s%10s%10s%10s%10s%",
-           "ROI", "index_x", "index_y", "index_z",
-           "atlas_x", "atlas_y", "atlas_z", "value", "curvature");
-    if (nvox_flag) {
-        pf_log(PF_LOG_PEAK_RESULTS, "%10s", "nvox");
-    }
-    pf_log(PF_LOG_PEAK_RESULTS,"\n");
-    for (i = 0; i < ntop && i < nlst; i++) {
-        if (plst[i].killed) continue;
-        for (k = 0; k < 3; k++) {
-            fndex[k] = (plst[i].x[k] + centerr[k]) / mmppixr[k];
-        }
-        pf_log(PF_LOG_PEAK_RESULTS,
-               "%-5d%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.4f%10.6f",
-               ntot++ + 1, fndex[0], fndex[1], fndex[2],
-               plst[i].x[0], plst[i].x[1], plst[i].x[2], plst[i].v,
-               -plst[i].del2v);
-        if (nvox_flag) {
-            pf_log(PF_LOG_PEAK_RESULTS, "%10d", plst[i].nvox);
-        }
-        pf_log(PF_LOG_PEAK_RESULTS, "\n");
-    }
-    return ntot;
-}
-#endif
+#define MIN(a,b) (a<b?a:b)
 
 
 /**
@@ -106,16 +75,29 @@ static float pdist2(const EXTREMUM *p1, const EXTREMUM *p2) {
  * @param npos number of positive peaks
  * @param pneg negative peaks array
  * @param nneg number of negative peaks
+ * @param ntop maximum number of peaks
  * @return number of combined peaks (i.e., size of *ppall)
  */
 static int combine_extrema(EXTREMUM **ppall,
                            EXTREMUM *ppos, int npos,
-                           EXTREMUM *pneg, int nneg) {
+                           EXTREMUM *pneg, int nneg,
+                           int ntop) {
     int i, nall = 0;
-    for (i = 0; i < npos; i++) {
+    int np = MIN(npos,ntop), nn = MIN(nneg,ntop);
+
+    pf_log(PF_LOG_PEAK_TRACE, "consolidating %d + %d peaks to 2*%d\n",
+           npos, nneg, ntop);
+    if (np > 0) {
+        pf_log(PF_LOG_PEAK_TRACE, "first + peak value: %g\n", ppos[0].v);
+    }
+    if (nn > 0) {
+        pf_log(PF_LOG_PEAK_TRACE, "first - peak value: %g\n", pneg[0].v);
+    }
+
+    for (i = 0; i < np; i++) {
         if (!ppos[i].killed) nall++;
     }
-    for (i = 0; i < nneg; i++) {
+    for (i = 0; i < nn; i++) {
         if (!pneg[i].killed) nall++;
     }
 
@@ -127,12 +109,12 @@ static int combine_extrema(EXTREMUM **ppall,
             pf_error(PF_ERR_ALLOCATION, "peak combination");
         }
 
-        for (i = 0; i < npos; i++) {
+        for (i = 0; i < np; i++) {
             if (!ppos[i].killed) {
                 (*ppall)[iall++] = ppos[i];
             }
         }
-        for (i = 0; i < nneg; i++) {
+        for (i = 0; i < nn; i++) {
             if (!pneg[i].killed) {
                 (*ppall)[iall++] = pneg[i];
             }
@@ -152,13 +134,15 @@ static int combine_extrema(EXTREMUM **ppall,
  *
  * @param plst array of peaks
  * @param nlst size of peak array
+ * @param ntop maximum number of peaks to consider
  * @param d2thresh square of threshold distance
  */
-static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
+static void consolidate(EXTREMUM *plst, int nlst, int ntop, float d2thresh) {
     int npair;
     do {
         float d2min = HUGE_VALF;
         int i, j, imin, jmin;
+        int n = MIN(ntop,nlst);
 
         /* On each pass, if any peaks are within threshold distance of
          * each other, consolidate just the two closest peaks.
@@ -171,9 +155,9 @@ static void consolidate(EXTREMUM *plst, int nlst, float d2thresh) {
         npair = 0;
         pf_log(PF_LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm: ",
                sqrt(d2thresh));
-        for (i = 0; i < nlst; i++) {
+        for (i = 0; i < n; i++) {
             if (plst[i].killed) continue;
-            for (j = i + 1; j < nlst; j++) {
+            for (j = i + 1; j < n; j++) {
                 float d2;
                 if (plst[j].killed) continue;
                 d2 = pdist2(plst + i, plst + j);
@@ -305,8 +289,9 @@ static int cull_small_extrema(const float *img, const float *mask,
                               int max_peaks,
                               int orad, int min_vox) {
     const int orad2 = orad * orad;
-    int iz, iy, ix, i, nkilled = 0;
+    int iz, iy, ix, i, nkilled = 0, nall = MIN(*nallp,max_peaks);
     EXTREMUM loc;
+
 
     if (min_vox <= 0) {
         return 0;
@@ -330,7 +315,7 @@ static int cull_small_extrema(const float *img, const float *mask,
                 float d2min = HUGE_VALF;
 
                 loc.x[0] = (ix + 1)*mmppixr[0] - centerr[0];
-                for (ip = 0; ip < *nallp; ip++) {
+                for (ip = 0; ip < nall; ip++) {
                     float d2;
                     d2 = pdist2(&loc, *pallp + ip);
                     if (d2 < d2min) {
@@ -348,35 +333,35 @@ static int cull_small_extrema(const float *img, const float *mask,
     }
 
     /* cull peaks that are too small by voxel count */
-    for (i = 0; i < *nallp && i < max_peaks; i++) {
+    for (i = 0; i < nall; i++) {
         if ((*pallp)[i].nvox < min_vox) {
             (*pallp)[i].killed = 1;
             nkilled++;
         }
     }
     /* also cull peaks that are past the peak count cutoff */
-    for (; i < *nallp; i++) {
+    for (; i < nall; i++) {
         (*pallp)[i].killed = 1;
         nkilled++;
     }
 
     /* if any peaks were killed, make a new, compacted peaks list */
-    if (nkilled == *nallp) {
+    if (nkilled >= nall) {
         *pallp = 0;
         free(*pallp);
         *nallp = 0;
     } else if (nkilled > 0) {
         int j;
-        EXTREMUM *pnew = malloc((*nallp - nkilled) * sizeof(EXTREMUM));
+        EXTREMUM *pnew = malloc((nall - nkilled) * sizeof(EXTREMUM));
         if (!pnew) {
             pf_error(PF_ERR_ALLOCATION, "surviving peaks");
         }
-        for (i = j = 0; i < *nallp; i++) {
+        for (i = j = 0; i < nall; i++) {
             if (!(*pallp)[i].killed) {
                 pnew[j++] = (*pallp)[i];
             }
         }
-        assert(j == *nallp - nkilled);
+        assert(j == nall - nkilled);
         *nallp = j;
         *pallp = pnew;
     }
@@ -563,17 +548,11 @@ find_peaks(float *image, const int dim[3],
 
     /* Sort by value, then consolidate nearby extrema */
     qsort(ppos, npos, sizeof(EXTREMUM), pcompare);
-    consolidate(ppos, npos, d2thresh);
+    consolidate(ppos, npos, max_peaks, d2thresh);
     qsort(pneg, nneg, sizeof(EXTREMUM), pcompare);
-    consolidate(pneg, nneg, d2thresh);
+    consolidate(pneg, nneg, max_peaks, d2thresh);
 
-#if 0
-    /* print the list of peaks */
-    logpeaklist(ppos, npos, mmppixr, centerr, max_peaks, 0);
-    logpeaklist(pneg, nneg, mmppixr, centerr, max_peaks, 0);
-#endif
-
-    nall = combine_extrema(&pall, ppos, npos, pneg, nneg);
+    nall = combine_extrema(&pall, ppos, npos, pneg, nneg, max_peaks);
 
     pf_log(PF_LOG_PEAK_TRACE, "after consolidation nall = %d\n", nall);
 
