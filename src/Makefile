@@ -8,7 +8,7 @@ LDLIBS=-lblas -lm -lgfortran
 .SUFFIXES: .mex
 
 TARGETS= test_peakfind peakfind.so \
-	peakfind.mex sphereblur.mex pf_set_log.mex
+	peakfind.mex sphereblur.mex
 
 OBJECTS=find_peaks.o blur.o pflog.o pferr.o \
 	fftsol.o hsphere3d.o imgpad.o imgvalx.o matopr.o polfit.o
@@ -40,5 +40,3 @@ pferr.o: pferr.c pf_util.h
 peakfind.mex: peakfind.c $(OBJECTS)
 
 sphereblur.mex: sphereblur.c $(OBJECTS)
-
-pf_set_log.mex: pf_set_log.c $(OBJECTS)
