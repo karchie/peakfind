@@ -14,9 +14,10 @@
 
 
 typedef struct {
+    int        i[3];            /**< index of peak */
     float      x[3];            /**< location of peak */
-    float      v;               /**<  value at peak */
-    float      del2v;           /**<  Laplacian at peak */
+    float      v;               /**< value at peak */
+    float      del2v;           /**< Laplacian at peak */
     float      weight;
     int        nvox;
     int        killed;

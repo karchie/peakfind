@@ -437,7 +437,7 @@ static int cull_small_extrema(const float *img, const float *mask,
                  (float*)centerr, (float*)mmppixr, x, &vx, &slice);     \
         if (slice < 1) {                                                \
             pf_log(PF_LOG_UNDEF_POINT,                                     \
-                   "undefined imgvalx point %d %d %d", ix, iy, iz);     \
+                   "undefined imgvalx point %d %d %d\n", ix, iy, iz);     \
             continue;                                                   \
         }                                                               \
         if (vt ## dir op vx) continue;                                  \
@@ -448,6 +448,9 @@ static int cull_small_extrema(const float *img, const float *mask,
                 pf_error(PF_ERR_ALLOCATION, "extrema array update"); \
         }                                                               \
         for (k = 0; k < 3; k++) p ## dir[n ## dir].x[k] = x[k];         \
+        p ## dir[n ## dir].i[0] = ix;                                   \
+        p ## dir[n ## dir].i[1] = iy;                                   \
+        p ## dir[n ## dir].i[2] = iz;                                   \
         p ## dir[n ## dir].v = vx;                                      \
         p ## dir[n ## dir].del2v = del2v;                               \
         p ## dir[n ## dir].weight = 1.0;                                \
@@ -499,7 +502,6 @@ find_peaks(float *image, const int dim[3],
         max_peaks = NTOP;
     }
 
-    pf_log_to_stderr();
     pf_log(PF_LOG_PEAK_TRACE,
            "starting find_peaks with orad=%g...\n",
            orad);
@@ -517,7 +519,7 @@ find_peaks(float *image, const int dim[3],
            "peak value     thresholds %10.4f,%10.4f\n", vtneg, vtpos);
     pf_log(PF_LOG_PEAK_PARAMS,
            "peak curvature thresholds %10.4f,%10.4f\n", ctneg, ctpos);
-    pf_log(PF_LOG_PEAK_TRACE, "compiling extrema slices");
+    pf_log(PF_LOG_PEAK_TRACE, "compiling extrema slices\n");
 
     for (iz = 1; iz < dim[2] - 1; iz++) {
         for (iy = 1; iy < dim[1] - 1; iy++) {
@@ -592,4 +594,6 @@ find_peaks(float *image, const int dim[3],
     } else {
       free(pall);
     }
+
+    pf_log(PF_LOG_PEAK_TRACE, "done.\n");
 }

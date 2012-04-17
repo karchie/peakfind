@@ -6,13 +6,18 @@
  * Author: Kevin A. Archie
  */
 
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "matrix.h"
 #include "mex.h"
 
 #include "peakfind.h"
+#include "pf_util.h"
 
 #define DIMS 3
 
@@ -26,7 +31,7 @@
 #define ROI    plhs[1]
 
 static const char *peak_fields[] = {
-    "i", "x", "v", "del2v", "weight", "voxels"
+    "i", "ix", "x", "v", "del2v", "weight", "voxels"
 };
 static const int n_peak_fields = sizeof(peak_fields)/sizeof(*peak_fields);
 
@@ -63,7 +68,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
     float *mmppixr, *centerr;
     int npeaks;
     EXTREMUM *peaks;
-    
+    FILE *logfp = 0;
+
     /* REQUIRED: image, mmppixr, centerr, orad, mask
      * OPTIONAL: vtpos, vtneg, ctpos, ctneg, dthresh
      */
@@ -89,6 +95,21 @@ void mexFunction(int nlhs, mxArray *plhs[],
                 minvox = getIntVal(prhs[++i]);
             } else if (0 == strcmp("ntop", keybuf)) {
                 ntop = getIntVal(prhs[++i]);
+            } else if (0 == strcmp("log", keybuf)) {
+                char logpath[PATH_MAX];
+                int r = mxGetString(prhs[++i], logpath, PATH_MAX-1);
+                if (0 == r) {
+                    logfp = fopen(logpath, "w+");
+                    if (logfp) {
+                        pf_log_to(logfp);
+                    } else {
+                        mexErrMsgIdAndTxt("MATLAB:peakfind:invalidLogFile",
+                                          strerror(errno));
+                    }
+                } else {
+                    mexErrMsgIdAndTxt("MATLAB:peakfind:invalidLogFile",
+                                      "unable to determine logfile path");
+                }
             } else {
                 mexErrMsgIdAndTxt("MATLAB:peakfind:invalidKey", keybuf);
             }
@@ -158,35 +179,47 @@ void mexFunction(int nlhs, mxArray *plhs[],
         int j;
         EXTREMUM p = peaks[i];
 
-        mxArray *xi = mxCreateNumericMatrix(1, DIMS, mxSINGLE_CLASS, 0);
-        float *ivals = (float *)mxGetData(xi);
+        mxArray *ii = mxCreateNumericMatrix(1, DIMS, INT_CLASS, 0);
+        int *ivals = (int *)mxGetData(ii);
         for (j = 0; j < DIMS; j++) {
-            ivals[j] = (p.x[j] + centerr[j])/mmppixr[j];
+            ivals[j] = p.i[j];
         }
-        mxSetField(PEAKS, i, peak_fields[0], xi);
+        mxSetField(PEAKS, i, peak_fields[0], ii);
+
+        mxArray *xi = mxCreateNumericMatrix(1, DIMS, mxSINGLE_CLASS, 0);
+        float *ixvals = (float *)mxGetData(xi);
+        for (j = 0; j < DIMS; j++) {
+            ixvals[j] = (p.x[j] + centerr[j])/mmppixr[j];
+        }
+        mxSetField(PEAKS, i, peak_fields[1], xi);
 
         mxArray *x = mxCreateNumericMatrix(1, DIMS, mxSINGLE_CLASS, 0);
         float *xvals = (float *)mxGetData(x);
         for (j = 0; j < DIMS; j++) {
             xvals[j] = p.x[j];
         }
-        mxSetField(PEAKS, i, peak_fields[1], x);
+        mxSetField(PEAKS, i, peak_fields[2], x);
 
         mxArray *v = mxCreateNumericMatrix(1, 1, mxSINGLE_CLASS, 0);
         *(float*)mxGetData(v) = p.v;
-        mxSetField(PEAKS, i, peak_fields[2], v);
+        mxSetField(PEAKS, i, peak_fields[3], v);
 
         mxArray *del2v = mxCreateNumericMatrix(1, 1, mxSINGLE_CLASS, 0);
         *(float*)mxGetData(del2v) = p.del2v;
-        mxSetField(PEAKS, i, peak_fields[3], del2v); 
+        mxSetField(PEAKS, i, peak_fields[4], del2v); 
        
         mxArray *w = mxCreateNumericMatrix(1, 1, INT_CLASS, 0);
         *(int*)mxGetData(w) = p.weight;
-        mxSetField(PEAKS, i, peak_fields[4], w);
+        mxSetField(PEAKS, i, peak_fields[5], w);
 
         mxArray *nvox = mxCreateNumericMatrix(1, 1, INT_CLASS, 0);
         *(int*)mxGetData(nvox) = p.nvox;
-        mxSetField(PEAKS, i, peak_fields[5], nvox);
+        mxSetField(PEAKS, i, peak_fields[6], nvox);
+    }
+
+    if (logfp) {
+        pf_log_to_stdout();
+        fclose(logfp);
     }
     free(peaks);
 }
