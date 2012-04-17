@@ -32,6 +32,7 @@ vtpos : positive threshold peak value (default 0)
 vtneg : negative threshold peak value (default 0)
 ntop : maximum number of output peaks (default 1000)
 minvox : minimum output ROI voxel count (default 1)
+dthresh : maximum distance for merging peaks (default 0)
 ctpos : peak curvature threshold for positive peaks (default 0)
 ctneg : peak curvature threshold for negative peaks (default 0)
 

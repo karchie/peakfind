@@ -90,6 +90,8 @@ void mexFunction(int nlhs, mxArray *plhs[],
             } else if (0 == strcmp("ctpos", keybuf)) {
                 ctpos = getFloatVal(prhs[++i]);
             } else if (0 == strcmp("ctneg", keybuf)) {
+                ctneg = getFloatVal(prhs[++i]);
+            } else if (0 == strcmp("dthresh", keybuf)) {
                 dthresh = getIntVal(prhs[++i]);
             } else if (0 == strcmp("minvox", keybuf)) {
                 minvox = getIntVal(prhs[++i]);
