@@ -5,9 +5,10 @@ FFLAGS=-fPIC -g --fixed-line-length-132 -fcray-pointer
 CFLAGS=-std=c99 -fPIC -g
 LDLIBS=-lblas -lm -lgfortran
 
-.SUFFIXES: .mexa64
+.SUFFIXES: .mex
 
-TARGETS= test_peakfind peakfind.so peakfind.mexa64 sphereblur.mexa64
+TARGETS= test_peakfind peakfind.so \
+	peakfind.mex sphereblur.mex pf_set_log.mex
 
 OBJECTS=find_peaks.o blur.o pflog.o pferr.o \
 	fftsol.o hsphere3d.o imgpad.o imgvalx.o matopr.o polfit.o
@@ -33,9 +34,11 @@ pflog.o: pflog.c pf_util.h
 
 pferr.o: pferr.c pf_util.h
 
-%.mexa64 : %.c
-	$(MEX) $(MEXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+%.mex : %.c
+	$(MEX) $(MEXFLAGS) $^ -o $* $(LDFLAGS) $(LDLIBS)
 
-peakfind.mexa64: peakfind.c $(OBJECTS)
+peakfind.mex: peakfind.c $(OBJECTS)
 
-sphereblur.mexa64: sphereblur.c $(OBJECTS)
+sphereblur.mex: sphereblur.c $(OBJECTS)
+
+pf_set_log.mex: pf_set_log.c $(OBJECTS)
