@@ -36,14 +36,20 @@ void mexFunction(int nlhs, mxArray *plhs[],
         mexErrMsgIdAndTxt("MATLAB:sphereblur:invalidSpaceParams",
                           "mmppixr must be single precision 3-vector");
     }
-    if (1 != mxGetN(RADIUS) || 1 != mxGetM(RADIUS)
-        || !mxIsSingle(RADIUS)) {
+    if (1 != mxGetN(RADIUS) || 1 != mxGetM(RADIUS)) {
         mexErrMsgIdAndTxt("MATLAB:sphereblur:invalidParameter",
-                          "radius must be a single-precision number");
+                          "radius must be a floating point number");
     }
-    
+    if (mxIsSingle(RADIUS)) {
+      radius = *(float*)mxGetData(RADIUS);
+    } else if (mxIsDouble(RADIUS)) {
+      radius = (float)*(double*)mxGetData(RADIUS);
+    } else {
+        mexErrMsgIdAndTxt("MATLAB:sphereblur:invalidParameter",
+                          "radius must be a floating point number");
+    }
 
     BLURRED = mxDuplicateArray(IMAGE);
     sphereblur((float*)mxGetData(BLURRED), mxGetDimensions(BLURRED),
-               (float*)mxGetData(MMPVOX), *(float *)mxGetData(RADIUS));
+               (float*)mxGetData(MMPVOX), radius);
 }
