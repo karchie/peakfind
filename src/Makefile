@@ -16,7 +16,7 @@ OBJECTS=find_peaks.o blur.o pflog.o pferr.o \
 all: $(TARGETS)
 
 clean:
-	rm -f $(OBJECTS) $(TARGETS) *~
+	rm -f $(OBJECTS) $(TARGETS) *~ *.mexa64
 
 test_peakfind: test_peakfind.c $(OBJECTS)
 	$(CC) -g $(LDFLAGS) -o $@ $^ $(LDLIBS)
