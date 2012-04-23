@@ -1,4 +1,4 @@
-/**
+/** emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  * Logging for peakfind
  *
  * Copyright (c) 2012 Washington University

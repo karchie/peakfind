@@ -1,4 +1,4 @@
-/*
+/** emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  * 4dfpf
  * Declarations for Fortran subroutines from Avi's 4dfp code
  * Copyright (c) 2012 Washington University

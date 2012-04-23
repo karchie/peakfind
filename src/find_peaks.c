@@ -1,11 +1,9 @@
-/**
+/** emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  * peakfind.c
  * Find peaks in 3d volumes
  * Copyright (c) 2012 Washington University
  * Adapted from peak_4dfp by Avi Snyder and peak_nii by Tony Wilson
  * Author: Kevin A. Archie <karchie@wustl.edu>
- *
- * emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  **/
 
 #include <assert.h>

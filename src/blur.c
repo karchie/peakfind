@@ -1,4 +1,4 @@
-/**
+/** emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  * sphereblur
  * Apply a spherical blur using Avi's FORTRAN routine hsphere3d.
  *

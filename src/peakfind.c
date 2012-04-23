@@ -1,10 +1,10 @@
-/*
+/** emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  * peakfind
  * MEX file for calling find_peaks from MATLAB
  *
  * Copyright (c) 2012 Washington University
- * Author: Kevin A. Archie
- */
+ * Author: Kevin A. Archie <karchie@wustl.edu>
+ **/
 
 #include <errno.h>
 #include <limits.h>

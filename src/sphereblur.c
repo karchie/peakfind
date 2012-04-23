@@ -1,9 +1,9 @@
-/*
+/** emacs -*- indent-tabs-mode: nil; c-basic-offset: 4 -*-
  * sphereblur
  * MEX file for calling sphereblur from MATLAB
  *
  * Copyright (c) 2012 Washington University
- * Author: Kevin A. Archie
+ * Author: Kevin A. Archie <karchie@wustl.edu>
  */
 
 #include "matrix.h"
