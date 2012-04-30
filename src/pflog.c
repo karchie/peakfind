@@ -22,7 +22,7 @@ void pf_log(int option, char *message, ...) {
     }
     vfprintf(logfp, message, ap);
     va_end(ap);
-    fflush(stdout);
+    fflush(logfp);
 }
 
 void pf_log_to(FILE *fp) {
