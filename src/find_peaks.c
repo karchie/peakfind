@@ -23,7 +23,6 @@ static const unsigned int NTOP = 1000;
 
 #define MIN(a,b) (a<b?a:b)
 
-
 /**
  * qsort-compatible comparison function for sorting EXTREMUM structs
  * into descending value order
@@ -44,6 +43,29 @@ static int pcompare(const void *ptr1, const void *ptr2) {
     }
 }
 
+struct peak_edge_t {
+    int i1, i2;
+    EXTREMUM *p1, *p2;
+    float d2;
+};
+
+/**
+ * qsort-compatible comparison function for sorting peak edges
+ * into increasing distance order
+ * @param pe1 one peak_edge_t
+ * @param pe2 another peak_edge_t
+ * @return  0 if pe1.d2 == pe2.d2
+ *         -1 if pe1.d2 < pe2.d2
+ *          1 if pe1.d2 > pe2.d2
+ */
+static int edge_compare(const void *pe1, const void *pe2) {
+    const struct peak_edge_t *p1 = pe1, *p2 = pe2;
+    if (p1->d2 == p2->d2) {
+        return 0;
+    } else {
+        return p1->d2 < p2->d2 ? -1 : 1;
+    }
+}
 
 /**
  * Returns the square of the distance between two peaks.
@@ -136,63 +158,107 @@ static int combine_extrema(EXTREMUM **ppall,
  * @param d2thresh square of threshold distance
  */
 static void consolidate(EXTREMUM *plst, int nlst, int ntop, float d2thresh) {
-    int npair;
-    do {
-        float d2min = HUGE_VALF;
-        int i, j, imin, jmin;
-        int n = MIN(ntop,nlst);
+    struct peak_edge_t *edges, *edge;
+    int i, j, ip, nedges;
+    float last_d2 = 0;
+    int n = MIN(nlst,ntop);
 
-        /* On each pass, if any peaks are within threshold distance of
-         * each other, consolidate just the two closest peaks.
-         * Consolidation kills the larger-indexed peak, adds its weight to
-         * the surviving peak, and moves the surviving peak to the
-         * weighted average location.
-         */
+    edges = malloc(n*n*sizeof(struct peak_edge_t));
+    if (!edges) {
+        pf_error(PF_ERR_ALLOCATION, "peak edges");
+    }
 
-        /* Look for the closest within-threshold pair, if any */
-        npair = 0;
-        pf_log(PF_LOG_PEAK_RESULTS, "peak pairs closer than %.4f mm: ",
-               sqrt(d2thresh));
-        for (i = 0; i < n; i++) {
-            if (plst[i].killed) continue;
-            for (j = i + 1; j < n; j++) {
-                float d2;
-                if (plst[j].killed) continue;
-                d2 = pdist2(plst + i, plst + j);
-                if (d2 < d2thresh) {
-                    pf_log(PF_LOG_PEAK_RESULTS,
-                           "\n%5d%5d%10.4f", i + 1, j + 1, d2);
-                    if (d2 < d2min) {
-                        imin = i;
-                        jmin = j;
-                        d2min = d2;
-                    }
-                    npair++;
-                }
+    /* build the full set of edges */
+    for (i = 0, nedges = 0; i < n; i++) {
+        if (plst[i].killed) continue;
+        for (j = i + 1; j < n; j++) {
+            if (plst[j].killed) continue;
+            int k = nedges++;
+            edges[k].i1 = i;
+            edges[k].i2 = j;
+            edges[k].p1 = plst + i;
+            edges[k].p2 = plst + j;
+            edges[k].d2 = pdist2(plst + i, plst + j);
+        }
+    }
+
+    pf_log(PF_LOG_PEAK_TRACE, "%d raw edges, sorting by distance...", nedges);
+
+    qsort(edges, nedges, sizeof(struct peak_edge_t), edge_compare);
+
+    pf_log(PF_LOG_PEAK_TRACE, "done.\n");
+
+    for (i = 0; i < nedges && edges[i].d2 < d2thresh; i++) {
+        int k;
+        struct peak_edge_t *edge = edges + i;
+        if (edge->p1 == edge->p2) {
+            /* circular edges are former duplicates; skip */
+            continue;
+        }
+        assert(!edge->p1->killed && !edge->p2->killed);
+
+        float d2 = pdist2(edge->p1, edge->p2);
+        if (d2 != edge->d2) {
+            pf_log(PF_LOG_PEAK_TRACE, "!!! distance inconsistency: %g != %g\n",
+                   d2, edge->d2);
+        }
+        if (last_d2 > edge->d2) {
+            pf_log(PF_LOG_PEAK_RESULTS,
+                   "!!! edge %i breaks distance ordering: %g > %g\n",
+                   sqrt(last_d2), sqrt(edge->d2));
+        }
+        pf_log(PF_LOG_PEAK_TRACE,
+               "merge %d <- %d (distance %g)\n",
+               edge->i1+1, edge->i2+1, sqrt(edge->d2));
+        
+        if (edge->i1 > edge->i2) { /* take peaks in v order */
+            int ti = edge->i2; edge->i2 = edge->i1; edge->i1 = ti;
+            EXTREMUM *p = edge->p2; edge->p2 = edge->p1; edge->p1 = p;
+        }
+        edge->p2->killed = 1;
+        float weight = edge->p1->weight + edge->p2->weight;
+        for (k = 0; k < 3; k++) {
+            edge->p1->x[k] = (edge->p1->weight * edge->p1->x[k]
+                              + edge->p2->weight * edge->p2->x[k])
+                / weight;
+        }
+        edge->p1->weight = weight;
+        
+        /* We're done with edge i now. p2 is killed and p1 has
+           moved. Update following edges to fix distances for edges
+           involving p1 or p2. This can create some duplicate
+           edges. When the first of a set of duplicates is
+           processed, the others will be converted to circular
+           edges, bubbled to the front, and ignored. */
+        for (j = i + 1; j < nedges; j++) {
+            if (edges[j].p1 == edge->p2) {
+                edges[j].i1 = edge->i1;
+                edges[j].p1 = edge->p1;
+                edges[j].d2 = pdist2(edges[j].p1,edges[j].p2);
+            } else if (edges[j].p2 == edge->p2) {
+                edges[j].i2 = edge->i1;
+                edges[j].p2 = edge->p1;
+                edges[j].d2 = pdist2(edges[j].p1,edges[j].p2);
+            } else if (edges[j].p1 == edge->p1
+                       || edges[j].p2 == edge->p1) {
+                edges[j].d2 = pdist2(edges[j].p1,edges[j].p2);
+            }
+            
+            /* edge j might now be closer than preceding edges; if
+               it's within threshold, bubble it back as necessary to
+               maintain distance ordering -- possibly all the way
+               back to i+1. */
+            int jbubb = j;
+            for (k = j - 1; k > i && edges[jbubb].d2 < edges[k].d2; k--) {
+                struct peak_edge_t temp = edges[jbubb];
+                edges[jbubb] = edges[k];
+                edges[k] = temp;
+                jbubb = k;
             }
         }
+    }
 
-        /* If any peak pairs were within threshold, consolidate the
-         * closest pair.
-         */
-        pf_log(PF_LOG_PEAK_RESULTS, "%snpair = %d\n",
-	       npair ? "\n" : "", npair);
-        if (npair > 0) {
-            int k;
-            float x[3];
-
-            for (k = 0; k < 3; k++) {
-                x[k] = plst[imin].weight*plst[imin].x[k]
-                    + plst[jmin].weight*plst[jmin].x[k];
-            }
-            plst[imin].weight += plst[jmin].weight;
-            for (k = 0; k < 3; k++) {
-                plst[imin].x[k] = x[k] / plst[imin].weight;
-            }
-            plst[jmin].killed++;
-            npair--;
-        }
-    } while (npair > 0);
+    free(edges);
 }
 
 #define UNMASKED(mask, i) (!mask || (fabs(mask[i]) > 1.0e-37))
@@ -493,6 +559,7 @@ find_peaks(float *image, const int dim[3],
     if (!ppos) {
         pf_error(PF_ERR_ALLOCATION, "positive extremum array");
     }
+
     pneg = malloc(mpos * sizeof(EXTREMUM));
     if (!pneg) {
         pf_error(PF_ERR_ALLOCATION, "negative extremum array");
